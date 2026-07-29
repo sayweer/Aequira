@@ -20,7 +20,7 @@ the final decision remains publicly auditable against the announced rules.
 This repository is a pnpm monorepo:
 
 - `packages/contract` — Compact smart contract
-- `packages/sdk` — off-chain Merkle, credential, secret, and provider helpers
+- `packages/sdk` — typed contract deployment and provider boundary
 - `packages/cli` — organizer and integration CLI
 - `packages/ui` — web application
 
@@ -33,8 +33,10 @@ AEQUIRA has its first L1 contract slice:
 - a temporary public hashed reviewer allowlist
 - sealed score commitments with application-scoped replay protection
 - score opening and per-application aggregation
-- 9 local simulator tests covering happy paths, authorization, invalid inputs,
-  replay, privacy surface, and reveal integrity
+- a deployable `CompiledContract` bundle containing the required ZK assets
+- a typed SDK for deploy, join, private-state validation, and ledger queries
+- a CLI configuration/doctor slice for Preview and Preprod
+- 18 local tests covering the contract, SDK inputs, and CLI safety
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
 which pseudonymous reviewer acts. L2 will replace it with private Merkle
@@ -66,3 +68,18 @@ Compile only the Compact contract:
 ```bash
 pnpm compact:build
 ```
+
+Inspect the public Preprod configuration:
+
+```bash
+pnpm --filter @aequira/cli start config --network preprod --json
+```
+
+Check Node, compiled ZK assets, and the local proof server:
+
+```bash
+pnpm --filter @aequira/cli doctor
+```
+
+The CLI intentionally rejects wallet seeds, private keys, passwords, and
+contract secrets passed as command-line arguments.
