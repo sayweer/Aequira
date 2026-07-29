@@ -1,7 +1,8 @@
 # AEQUIRA Version Matrix
 
-> Status: bootstrap baseline; the complete Midnight combination is not yet
-> validated. Do not describe pending entries as a working toolchain.
+> Status: Compact development baseline verified; Docker-backed proving remains
+> pending. Change a pinned version only after checking the current official
+> compatibility matrix and compiling the official example.
 >
 > Last checked: 2026-07-30
 
@@ -16,20 +17,31 @@
 
 ## Midnight compatibility
 
-| Component                            | Version | Status                                             |
-| ------------------------------------ | ------- | -------------------------------------------------- |
-| Compact toolchain                    | Pending | Install and verify with `compact check`            |
-| Compact compiler                     | Pending | Record `compact compile --version` or tool output  |
-| Compact language version             | Pending | Copy from a successfully compiled official example |
-| `@midnight-ntwrk/compact-runtime`    | Pending | Resolve against the official compatibility matrix  |
-| `@midnight-ntwrk/midnight-js-*`      | Pending | Resolve against the official compatibility matrix  |
-| `@midnight-ntwrk/dapp-connector-api` | Pending | Resolve against the official compatibility matrix  |
-| `@midnight-ntwrk/testkit-js`         | Pending | Resolve against the official compatibility matrix  |
-| Ledger / on-chain runtime            | Pending | Resolve against the official compatibility matrix  |
-| Proof server image                   | Pending | Verify the running Docker image                    |
-| Indexer                              | Pending | Verify against the selected network stack          |
-| Lace                                 | Pending | Verify during the L2 wallet milestone              |
+| Component                            | Version | Evidence / status                                      |
+| ------------------------------------ | ------- | ------------------------------------------------------ |
+| Compact devtools (`compact`)         | 0.5.1   | Installed; `compact --version`                         |
+| Compact compiler / toolchain         | 0.31.1  | Installed; `compact compile --version`; check is green |
+| Compact language version             | 0.23.0  | Compiler output and compiled official example          |
+| `@midnight-ntwrk/compact-runtime`    | 0.16.0  | Official compatibility matrix; install pending         |
+| `@midnight-ntwrk/compact-js`         | 2.5.1   | Official compatibility matrix; install pending         |
+| Platform JS                          | 2.2.4   | Official compatibility matrix; install pending         |
+| `@midnight-ntwrk/midnight-js-*`      | 4.1.1   | Official matrix and current example; install pending   |
+| `@midnight-ntwrk/dapp-connector-api` | 4.0.1   | Official matrix and current example; install pending   |
+| `@midnight-ntwrk/testkit-js`         | 4.1.1   | Official matrix and current example; install pending   |
+| Wallet SDK                           | 1.2.0   | Official compatibility matrix; L2 installation pending |
+| Ledger / on-chain runtime            | 3.0.0   | Official compatibility matrix; install pending         |
+| Preprod node                         | 1.0.0   | Official compatibility matrix; remote service          |
+| Midnight Indexer                     | 4.3.3   | Official compatibility matrix; remote service          |
+| Proof server image                   | 8.1.0   | Official compatibility matrix; Docker pending          |
+| Lace                                 | Pending | Verify during the L2 wallet milestone                  |
 
-The current official bulletin-board example documents Compact compiler `0.31.0`
-and proof-server `8.0.3`. These are reference candidates, not yet a verified
-AEQUIRA combination.
+## Verification record
+
+The official `midnightntwrk/example-bboard` source at commit
+`c56dfa27d40b2dcdbe24c511d2d313d762e16a1c` (2026-07-28) passed its contract
+pipeline locally: Compact compile, TypeScript typecheck, ESLint, build, and 9
+Vitest tests.
+
+Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
+does not copy the example's lockfile or full dependency graph; dependencies will
+be added narrowly and audited when each workspace needs them.
