@@ -32,7 +32,20 @@ importers:
         specifier: 4.1.1
         version: 4.1.1
 
-  packages/sdk: {}
+  packages/sdk:
+    dependencies:
+      '@aequira/contract':
+        specifier: workspace:*
+        version: link:../contract
+      '@midnight-ntwrk/compact-runtime':
+        specifier: 0.16.0
+        version: 0.16.0
+      '@midnight-ntwrk/midnight-js-contracts':
+        specifier: 4.1.1
+        version: 4.1.1
+      '@midnight-ntwrk/midnight-js-types':
+        specifier: 4.1.1
+        version: 4.1.1
 
   packages/ui: {}
 
@@ -63,6 +76,12 @@ packages:
         integrity: sha512-rwOVP5kBwACpYmmY6+oLeaiM3e5gHscRMjbZUOntOC5QdtqLdpeep6eQW1OngI+sxjjdVoGg2eE16sLf+DAHmQ==,
       }
 
+  '@midnight-ntwrk/midnight-js-contracts@4.1.1':
+    resolution:
+      {
+        integrity: sha512-vHeKyaj9RXTx+Cep3YpIRgg2EWkzibO4gxI7k/rYpXmGXc3waetrR5sb9FPR7v9SUX00/zf/sYbLp1NZhwZbjg==,
+      }
+
   '@midnight-ntwrk/midnight-js-network-id@4.1.1':
     resolution:
       {
@@ -75,6 +94,18 @@ packages:
         integrity: sha512-JH1010ir3YrawKsA4C08aIXWpFGHrCrAaBkZFbn+xh+iwOX5Ss0WU4//mDSEnHvQN0wD6GTc2JwUfKYFaS2CcA==,
       }
 
+  '@midnight-ntwrk/midnight-js-types@4.1.1':
+    resolution:
+      {
+        integrity: sha512-MPT7YToXN2EsDtOOVSJonYZSZ4eqmdVgftBfH56w+tmZM0sZt9u+Mq18uuBQl9ebpTXnp8o7WqeISbgPMxTBcQ==,
+      }
+
+  '@midnight-ntwrk/midnight-js-utils@4.1.1':
+    resolution:
+      {
+        integrity: sha512-b65QADd2FaZbWXe9D3fe9mSGmPlP1DTRMGSruJqhl9fOTNxBhQIzIKs0j/eL9Kv77dVeGDYgQdbV+JkDj3j5Qg==,
+      }
+
   '@midnight-ntwrk/onchain-runtime-v3@3.0.0':
     resolution:
       {
@@ -85,6 +116,12 @@ packages:
     resolution:
       {
         integrity: sha512-6mrYKSSE8kPgn/5rQ2xofDJk1yAZZRdLOO6Yelweuh5GOnOGz7Qw4venDG/c4TRqtV9ouFp+F5j7ta8aprMinw==,
+      }
+
+  '@midnight-ntwrk/wallet-sdk-address-format@3.1.2':
+    resolution:
+      {
+        integrity: sha512-SRkgwmKFOZSUR25iurAB8U7kTKF7AljSl+tMkuuj8Pthc/l0yIg+/q1rFSozJ0Nz9FJRhshazDyrL0l84fOabg==,
       }
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
@@ -135,10 +172,40 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@pinojs/redact@0.4.0':
+    resolution:
+      {
+        integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==,
+      }
+
+  '@scure/base@2.2.0':
+    resolution:
+      {
+        integrity: sha512-b8XEupJibegiXV+tDUseI8oLQc8ei3d/4Jkb2RpbHh3MfE054ov3uIz2dhFkB3FI8iwYkEh0gGCApkrYggkPNg==,
+      }
+
   '@standard-schema/spec@1.1.0':
     resolution:
       {
         integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==,
+      }
+
+  '@subsquid/scale-codec@4.0.1':
+    resolution:
+      {
+        integrity: sha512-H3mi5GIvlrvOSJVSYQRNnaiulSDktPF4TwUvquAgN86tN4kokyX8XcEM2Htrm1sVWRtMi7SgYpyVR5Yg5iPKUQ==,
+      }
+
+  '@subsquid/util-internal-hex@1.2.3':
+    resolution:
+      {
+        integrity: sha512-rGIQKHP+RpriJR56oL/AD43H/KX1EQwsvUy8nP6IHnk/vmaLyC2ECTp5n0jB7kq4NYK4C2VotP3lXHR0vWpa0A==,
+      }
+
+  '@subsquid/util-internal-json@1.2.4':
+    resolution:
+      {
+        integrity: sha512-YrEzKjTRPRI4FtJVQqn3mPlIYSWbKGazpOpccRYITmxH0jzKtUfwpIkeCRurVsB/293+oFO8YqyQ6LO14FbLwQ==,
       }
 
   '@types/node@25.3.0':
@@ -152,6 +219,13 @@ packages:
       {
         integrity: sha512-lwGTVESDDV+XsQ1pH4UifpJ1f7OtXzQ6QBOX2Afq2bM/T3oOt8hF6exJMjjIjtEWeAN2YAo25J7HxWh97CCz9w==,
       }
+
+  atomic-sleep@1.0.0:
+    resolution:
+      {
+        integrity: sha512-kNOjDqAh7px0XWNI+4QbzoiR/nTkHAWNud2uvnJquD1/x5a7EQZMJT0AczqK0Qn67oY/TTQ1LbUKajZpp3I9tQ==,
+      }
+    engines: { node: '>=8.0.0' }
 
   detect-libc@2.1.2:
     resolution:
@@ -212,6 +286,32 @@ packages:
       }
     engines: { node: '>= 0.4' }
 
+  on-exit-leak-free@2.1.2:
+    resolution:
+      {
+        integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==,
+      }
+    engines: { node: '>=14.0.0' }
+
+  pino-abstract-transport@3.0.0:
+    resolution:
+      {
+        integrity: sha512-wlfUczU+n7Hy/Ha5j9a/gZNy7We5+cXp8YL+X+PG8S0KXxw7n/JXA3c46Y0zQznIJ83URJiwy7Lh56WLokNuxg==,
+      }
+
+  pino-std-serializers@7.1.0:
+    resolution:
+      {
+        integrity: sha512-BndPH67/JxGExRgiX1dX0w1FvZck5Wa4aal9198SrRhZjH3GxKQUKIBnYJTdj2HDN3UQAS06HlfcSbQj2OHmaw==,
+      }
+
+  pino@10.3.1:
+    resolution:
+      {
+        integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==,
+      }
+    hasBin: true
+
   prettier@3.8.1:
     resolution:
       {
@@ -220,11 +320,69 @@ packages:
     engines: { node: '>=14' }
     hasBin: true
 
+  process-warning@5.0.0:
+    resolution:
+      {
+        integrity: sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==,
+      }
+
   pure-rand@6.1.0:
     resolution:
       {
         integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==,
       }
+
+  quick-format-unescaped@4.0.4:
+    resolution:
+      {
+        integrity: sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg==,
+      }
+
+  real-require@0.2.0:
+    resolution:
+      {
+        integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==,
+      }
+    engines: { node: '>= 12.13.0' }
+
+  real-require@1.0.0:
+    resolution:
+      {
+        integrity: sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g==,
+      }
+
+  rxjs@7.8.2:
+    resolution:
+      {
+        integrity: sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA==,
+      }
+
+  safe-stable-stringify@2.5.0:
+    resolution:
+      {
+        integrity: sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA==,
+      }
+    engines: { node: '>=10' }
+
+  sonic-boom@4.2.1:
+    resolution:
+      {
+        integrity: sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q==,
+      }
+
+  split2@4.2.0:
+    resolution:
+      {
+        integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==,
+      }
+    engines: { node: '>= 10.x' }
+
+  thread-stream@4.2.0:
+    resolution:
+      {
+        integrity: sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==,
+      }
+    engines: { node: '>=20' }
 
   tslib@2.8.1:
     resolution:
@@ -271,6 +429,13 @@ snapshots:
 
   '@midnight-ntwrk/ledger-v8@8.1.0': {}
 
+  '@midnight-ntwrk/midnight-js-contracts@4.1.1':
+    dependencies:
+      '@midnight-ntwrk/midnight-js-network-id': 4.1.1
+      '@midnight-ntwrk/midnight-js-protocol': 4.1.1
+      '@midnight-ntwrk/midnight-js-types': 4.1.1
+      '@midnight-ntwrk/midnight-js-utils': 4.1.1
+
   '@midnight-ntwrk/midnight-js-network-id@4.1.1': {}
 
   '@midnight-ntwrk/midnight-js-protocol@4.1.1':
@@ -281,6 +446,19 @@ snapshots:
       '@midnight-ntwrk/onchain-runtime-v3': 3.0.0
       '@midnight-ntwrk/platform-js': 2.2.4
 
+  '@midnight-ntwrk/midnight-js-types@4.1.1':
+    dependencies:
+      '@midnight-ntwrk/midnight-js-protocol': 4.1.1
+      effect: 3.22.0
+      pino: 10.3.1
+      rxjs: 7.8.2
+
+  '@midnight-ntwrk/midnight-js-utils@4.1.1':
+    dependencies:
+      '@midnight-ntwrk/midnight-js-network-id': 4.1.1
+      '@midnight-ntwrk/midnight-js-protocol': 4.1.1
+      '@midnight-ntwrk/wallet-sdk-address-format': 3.1.2
+
   '@midnight-ntwrk/onchain-runtime-v3@3.0.0': {}
 
   '@midnight-ntwrk/platform-js@2.2.4':
@@ -288,6 +466,12 @@ snapshots:
       '@effect/platform': 0.95.0(effect@3.22.0)
       effect: 3.22.0
       tslib: 2.8.1
+
+  '@midnight-ntwrk/wallet-sdk-address-format@3.1.2':
+    dependencies:
+      '@midnight-ntwrk/ledger-v8': 8.1.0
+      '@scure/base': 2.2.0
+      '@subsquid/scale-codec': 4.0.1
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
     optional: true
@@ -307,13 +491,30 @@ snapshots:
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
     optional: true
 
+  '@pinojs/redact@0.4.0': {}
+
+  '@scure/base@2.2.0': {}
+
   '@standard-schema/spec@1.1.0': {}
+
+  '@subsquid/scale-codec@4.0.1':
+    dependencies:
+      '@subsquid/util-internal-hex': 1.2.3
+      '@subsquid/util-internal-json': 1.2.4
+
+  '@subsquid/util-internal-hex@1.2.3': {}
+
+  '@subsquid/util-internal-json@1.2.4':
+    dependencies:
+      '@subsquid/util-internal-hex': 1.2.3
 
   '@types/node@25.3.0':
     dependencies:
       undici-types: 7.18.2
 
   '@types/object-inspect@1.13.0': {}
+
+  atomic-sleep@1.0.0: {}
 
   detect-libc@2.1.2:
     optional: true
@@ -354,9 +555,55 @@ snapshots:
 
   object-inspect@1.13.4: {}
 
+  on-exit-leak-free@2.1.2: {}
+
+  pino-abstract-transport@3.0.0:
+    dependencies:
+      split2: 4.2.0
+
+  pino-std-serializers@7.1.0: {}
+
+  pino@10.3.1:
+    dependencies:
+      '@pinojs/redact': 0.4.0
+      atomic-sleep: 1.0.0
+      on-exit-leak-free: 2.1.2
+      pino-abstract-transport: 3.0.0
+      pino-std-serializers: 7.1.0
+      process-warning: 5.0.0
+      quick-format-unescaped: 4.0.4
+      real-require: 0.2.0
+      safe-stable-stringify: 2.5.0
+      sonic-boom: 4.2.1
+      thread-stream: 4.2.0
+
   prettier@3.8.1: {}
 
+  process-warning@5.0.0: {}
+
   pure-rand@6.1.0: {}
+
+  quick-format-unescaped@4.0.4: {}
+
+  real-require@0.2.0: {}
+
+  real-require@1.0.0: {}
+
+  rxjs@7.8.2:
+    dependencies:
+      tslib: 2.8.1
+
+  safe-stable-stringify@2.5.0: {}
+
+  sonic-boom@4.2.1:
+    dependencies:
+      atomic-sleep: 1.0.0
+
+  split2@4.2.0: {}
+
+  thread-stream@4.2.0:
+    dependencies:
+      real-require: 1.0.0
 
   tslib@2.8.1: {}
 

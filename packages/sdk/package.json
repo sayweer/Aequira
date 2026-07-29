@@ -3,7 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "engines": {
     "node": ">=24.11.1"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "test": "pnpm run build && node --test",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aequira/contract": "workspace:*",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/midnight-js-contracts": "4.1.1",
+    "@midnight-ntwrk/midnight-js-types": "4.1.1"
   }
 }
