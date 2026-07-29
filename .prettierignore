@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+out/
+.next/
+coverage/
+packages/contract/src/managed/
+packages/ui/public/zk/
