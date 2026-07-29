@@ -3,7 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "engines": {
     "node": ">=24.11.1"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && cp -R src/managed/. dist/managed/ && cp src/aequira.compact dist/aequira.compact",
+    "compact:build": "compact compile src/aequira.compact ./src/managed/aequira",
+    "compact:check": "compact format --check src/aequira.compact && pnpm run compact:build",
+    "test": "pnpm run build && node --test",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/midnight-js-protocol": "4.1.1"
+  },
+  "devDependencies": {
+    "@midnight-ntwrk/midnight-js-network-id": "4.1.1"
   }
 }

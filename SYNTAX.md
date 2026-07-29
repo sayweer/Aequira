@@ -31,6 +31,11 @@ import CompactStandardLibrary;
 The plan's generic `>= 0.19` pragma must not be used. The current compiler and
 official example use an exact language version.
 
+The plan's top-level declaration `const MAX_SCORE: Uint<16> = 100;` was rejected
+by compiler `0.31.1` as an invalid program element. The L1 contract currently
+uses the typed numeric literal directly in its assertion instead of pretending
+that the older constant syntax still works.
+
 ## Public ledger declarations
 
 Ledger fields use `export ledger`, not an unexported `ledger` declaration:
@@ -102,6 +107,25 @@ adjacent comment explaining why that exact value is safe to publish.
 AEQUIRA must never disclose applicant or reviewer secrets, private attributes,
 salts, nonces, Merkle paths, unrevealed scores, or conflict reasons.
 
+L1's hashed reviewer `Set` is a deliberate temporary limitation: querying
+membership requires disclosing which public pseudonym is accessed. This prevents
+raw-secret disclosure but remains linkable to the organizer. Private Merkle
+membership is required in L2 before claiming reviewer unlinkability.
+
+## Administrator authentication
+
+The L1 phase circuits use the same compiler-verified hash-preimage pattern as the
+official lock/bulletin-board examples:
+
+- constructor stores a domain-separated hash of the admin secret and round ID
+- the admin secret remains in the TypeScript private state and is returned by a
+  witness
+- privileged circuits assert that the witness preimage matches the stored
+  authority
+- phase circuits permit only `SETUP -> APPLY -> REVIEW -> REVEAL`
+
+Local simulator tests verified wrong-secret rejection and one-way phase guards.
+
 ## Hashes and commitments
 
 The verified standard-library signatures are:
@@ -138,7 +162,5 @@ being guessed.
 - The exact circuit-side method for verifying an off-chain Merkle path against a
   stored root has not yet been proven. The plan's placeholder
   `applicantMerkleVerify(...)` must not be copied as though it exists.
-- Admin authorization primitives must be verified against a current official
-  contract before `openRound` or `advancePhase` is implemented.
 - Constraint statistics need a supported compiler or artifact inspection method
   before the heavy `apply` circuit is accepted.

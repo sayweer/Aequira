@@ -26,8 +26,22 @@ This repository is a pnpm monorepo:
 
 ## Current status
 
-AEQUIRA is in L1-A bootstrap. The workspace and version policy are being
-established before contract code is written. No contract is deployed yet.
+AEQUIRA has its first L1 contract slice:
+
+- administrator-only, one-way phase transitions through setup, apply, review,
+  and reveal
+- a temporary public hashed reviewer allowlist
+- sealed score commitments with application-scoped replay protection
+- score opening and per-application aggregation
+- 9 local simulator tests covering happy paths, authorization, invalid inputs,
+  replay, privacy surface, and reveal integrity
+
+The L1 reviewer allowlist is intentionally temporary: membership access reveals
+which pseudonymous reviewer acts. L2 will replace it with private Merkle
+membership before the contract can claim reviewer unlinkability.
+
+No contract is deployed yet. Docker-backed proof-server verification remains
+pending.
 
 ## Requirements
 
@@ -45,4 +59,10 @@ Run all currently available checks:
 
 ```bash
 pnpm verify
+```
+
+Compile only the Compact contract:
+
+```bash
+pnpm compact:build
 ```

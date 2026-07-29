@@ -1,0 +1,157 @@
+pragma language_version 0.23;
+
+import CompactStandardLibrary;
+
+export enum Phase {
+  SETUP,
+  APPLY,
+  REVIEW,
+  REVEAL,
+  FINALIZED,
+  CLAIMED
+}
+
+export ledger phase: Phase;
+
+export ledger roundId: Bytes<32>;
+
+export ledger adminAuthority: Bytes<32>;
+
+// L1 uses a public hashed allowlist. A private Merkle membership proof replaces
+// this in L2 because Set membership reveals which pseudonymous reviewer acts.
+export ledger reviewers: Set<Bytes<32>>;
+
+export ledger scoreNullifiers: Set<Bytes<32>>;
+
+export ledger scoreCommitments: Set<Bytes<32>>;
+
+export ledger scoreSums: Map<Bytes<32>, Counter>;
+
+export ledger revealedCounts: Map<Bytes<32>, Counter>;
+
+constructor(initialRoundId: Bytes<32>, initialAdminSecret: Bytes<32>) {
+  const publicRoundId = disclose(initialRoundId); // Safe: the round identifier is intentionally public metadata.
+  const publicAdminAuthority = disclose(adminId(initialRoundId, initialAdminSecret)); // Safe: domain-separated one-way hash; the admin secret remains private.
+
+  phase = Phase.SETUP;
+  roundId = publicRoundId;
+  adminAuthority = publicAdminAuthority;
+}
+
+witness adminSecret(): Bytes<32>;
+
+witness reviewerSecret(): Bytes<32>;
+
+witness reviewScore(): Uint<16>;
+
+witness reviewSalt(): Bytes<32>;
+
+export circuit adminId(activeRoundId: Bytes<32>, secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "aequira:admin:v1"), activeRoundId, secret]);
+}
+
+export circuit reviewerId(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "aequira:reviewer:v1"), secret]);
+}
+
+export circuit scoreNullifier(
+                 activeRoundId: Bytes<32>,
+                 applicationId: Bytes<32>,
+                 secret: Bytes<32>
+                 ): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>(
+           [pad(32, "aequira:score-nullifier:v1"), activeRoundId, applicationId, secret]
+           );
+}
+
+export circuit scoreCommitment(
+                 activeRoundId: Bytes<32>,
+                 applicationId: Bytes<32>,
+                 score: Uint<16>,
+                 secret: Bytes<32>,
+                 salt: Bytes<32>
+                 ): Bytes<32> {
+  return persistentCommit<Vector<5, Bytes<32>>>(
+           [pad(32, "aequira:score:v1"), activeRoundId, applicationId, score as Bytes<32>, secret],
+           salt
+           );
+}
+
+circuit assertAdmin(): [] {
+  assert(adminAuthority == adminId(roundId, adminSecret()),
+         "Only the round administrator can perform this action"
+         );
+}
+
+export circuit registerReviewer(id: Bytes<32>): [] {
+  assert(phase == Phase.SETUP, "Reviewers can only be registered during setup");
+  assertAdmin();
+  const publicReviewerId = disclose(id); // Safe for L1 only: public pseudonym; replaced by private Merkle membership in L2.
+  assert(!reviewers.member(publicReviewerId), "Reviewer is already registered");
+  reviewers.insert(publicReviewerId);
+}
+
+export circuit openApplications(): [] {
+  assert(phase == Phase.SETUP, "Applications can only open after setup");
+  assertAdmin();
+  phase = Phase.APPLY;
+}
+
+export circuit openReview(): [] {
+  assert(phase == Phase.APPLY, "Review can only open after applications");
+  assertAdmin();
+  phase = Phase.REVIEW;
+}
+
+export circuit openReveal(): [] {
+  assert(phase == Phase.REVIEW, "Reveal can only open after review");
+  assertAdmin();
+  phase = Phase.REVEAL;
+}
+
+export circuit commitScore(applicationId: Bytes<32>): [] {
+  assert(phase == Phase.REVIEW, "Scores can only be committed during review");
+
+  const secret = reviewerSecret();
+  const id = reviewerId(secret);
+  const score = reviewScore();
+  const nullifier = scoreNullifier(roundId, applicationId, secret);
+
+  // L1 limitation: this disclosure identifies the acting allowlist pseudonym.
+  // L2 replaces it with a private Merkle membership proof.
+  const publicReviewerId = disclose(id);
+  assert(reviewers.member(publicReviewerId), "Reviewer is not registered");
+  assert(score <= 100, "Score exceeds the rubric maximum");
+  const publicNullifier = disclose(nullifier); // Safe: application-scoped, domain-separated one-way hash used for replay protection.
+  assert(!scoreNullifiers.member(publicNullifier), "Reviewer already scored this application");
+
+  const commitment = scoreCommitment(roundId, applicationId, score, secret, reviewSalt());
+  const publicCommitment = disclose(commitment); // Safe: salted commitment hides the score and reviewer secret until reveal.
+
+  scoreNullifiers.insert(publicNullifier);
+  scoreCommitments.insert(publicCommitment);
+}
+
+export circuit revealScore(applicationId: Bytes<32>): [] {
+  assert(phase == Phase.REVEAL, "Scores can only be revealed during reveal");
+
+  const secret = reviewerSecret();
+  const score = reviewScore();
+  const commitment = scoreCommitment(roundId, applicationId, score, secret, reviewSalt());
+  const publicCommitment = disclose(commitment); // Safe: this exact salted commitment was already public during REVIEW.
+
+  assert(scoreCommitments.member(publicCommitment), "Matching score commitment was not found");
+  scoreCommitments.remove(publicCommitment);
+
+  const publicApplicationId = disclose(applicationId); // Safe: application identifiers are public pseudonyms by design.
+  if (!scoreSums.member(publicApplicationId)) {
+    scoreSums.insertDefault(publicApplicationId);
+  }
+  if (!revealedCounts.member(publicApplicationId)) {
+    revealedCounts.insertDefault(publicApplicationId);
+  }
+
+  const publicScore = disclose(score); // Safe in REVEAL: the previously committed score is intentionally opened.
+  scoreSums.lookup(publicApplicationId).increment(publicScore);
+  revealedCounts.lookup(publicApplicationId).increment(1);
+}

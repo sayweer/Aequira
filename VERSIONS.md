@@ -17,23 +17,25 @@
 
 ## Midnight compatibility
 
-| Component                            | Version | Evidence / status                                      |
-| ------------------------------------ | ------- | ------------------------------------------------------ |
-| Compact devtools (`compact`)         | 0.5.1   | Installed; `compact --version`                         |
-| Compact compiler / toolchain         | 0.31.1  | Installed; `compact compile --version`; check is green |
-| Compact language version             | 0.23.0  | Compiler output and compiled official example          |
-| `@midnight-ntwrk/compact-runtime`    | 0.16.0  | Official compatibility matrix; install pending         |
-| `@midnight-ntwrk/compact-js`         | 2.5.1   | Official compatibility matrix; install pending         |
-| Platform JS                          | 2.2.4   | Official compatibility matrix; install pending         |
-| `@midnight-ntwrk/midnight-js-*`      | 4.1.1   | Official matrix and current example; install pending   |
-| `@midnight-ntwrk/dapp-connector-api` | 4.0.1   | Official matrix and current example; install pending   |
-| `@midnight-ntwrk/testkit-js`         | 4.1.1   | Official matrix and current example; install pending   |
-| Wallet SDK                           | 1.2.0   | Official compatibility matrix; L2 installation pending |
-| Ledger / on-chain runtime            | 3.0.0   | Official compatibility matrix; install pending         |
-| Preprod node                         | 1.0.0   | Official compatibility matrix; remote service          |
-| Midnight Indexer                     | 4.3.3   | Official compatibility matrix; remote service          |
-| Proof server image                   | 8.1.0   | Official compatibility matrix; Docker pending          |
-| Lace                                 | Pending | Verify during the L2 wallet milestone                  |
+| Component                             | Version       | Evidence / status                                      |
+| ------------------------------------- | ------------- | ------------------------------------------------------ |
+| Compact devtools (`compact`)          | 0.5.1         | Installed; `compact --version`                         |
+| Compact compiler / toolchain          | 0.31.1        | Installed; `compact compile --version`; check is green |
+| Compact language version              | 0.23.0        | Compiler output and compiled official example          |
+| `@midnight-ntwrk/compact-runtime`     | 0.16.0        | Installed direct dependency                            |
+| `@midnight-ntwrk/compact-js`          | 2.5.1         | Installed through `midnight-js-protocol`               |
+| Platform JS                           | 2.2.4         | Installed through `midnight-js-protocol`               |
+| `midnight-js-protocol`                | 4.1.1         | Installed direct dependency                            |
+| `midnight-js-network-id`              | 4.1.1         | Installed development dependency                       |
+| Other `@midnight-ntwrk/midnight-js-*` | 4.1.1         | Add narrowly when CLI/UI integration begins            |
+| `@midnight-ntwrk/dapp-connector-api`  | 4.0.1         | Official matrix and current example; install pending   |
+| `@midnight-ntwrk/testkit-js`          | 4.1.1         | Official matrix and current example; install pending   |
+| Wallet SDK                            | 1.2.0         | Official compatibility matrix; L2 installation pending |
+| Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
+| Preprod node                          | 1.0.0         | Official compatibility matrix; remote service          |
+| Midnight Indexer                      | 4.3.3         | Official compatibility matrix; remote service          |
+| Proof server image                    | 8.1.0         | Official compatibility matrix; Docker pending          |
+| Lace                                  | Pending       | Verify during the L2 wallet milestone                  |
 
 ## Verification record
 
@@ -45,3 +47,7 @@ Vitest tests.
 Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
+
+The AEQUIRA L1 contract compiled 6 state-changing circuits and passed 9 local
+`node:test` simulator tests. `pnpm peers check`, the production audit, and the
+full dependency audit passed with no reported issues or known vulnerabilities.
