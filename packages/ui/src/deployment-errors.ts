@@ -4,8 +4,7 @@ export type DeploymentStage =
   | 'contract-deployment'
   | 'private-state'
   | 'provider-configuration'
-  | 'wallet-context'
-  | 'wallet-permissions';
+  | 'wallet-context';
 
 export class DeploymentStageError extends Error {
   constructor(
@@ -166,9 +165,6 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
 
   const stage = findDeploymentStage(error);
 
-  if (stage === 'wallet-permissions') {
-    return 'The wallet permission request did not complete. Reconnect Lace and approve the requested deployment permissions.';
-  }
   if (stage === 'wallet-context') {
     return 'AEQUIRA could not read Lace Preprod configuration, tDUST, or shielded addresses. Unlock and sync Lace, then reconnect.';
   }

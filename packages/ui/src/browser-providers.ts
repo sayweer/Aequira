@@ -63,16 +63,6 @@ export const createBrowserProviderSession = async (
   validatePassword(privateStatePassword);
   setNetworkId(AEQUIRA_NETWORK_ID);
 
-  await withDeploymentStage('wallet-permissions', () =>
-    connectedApi.hintUsage([
-      'getConfiguration',
-      'getDustBalance',
-      'getShieldedAddresses',
-      'balanceUnsealedTransaction',
-      'submitTransaction',
-    ]),
-  );
-
   const [configuration, dust, shieldedAddresses] = await withDeploymentStage('wallet-context', () =>
     Promise.all([
       connectedApi.getConfiguration(),
