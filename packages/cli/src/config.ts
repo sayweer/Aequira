@@ -43,7 +43,9 @@ const NETWORK_ENDPOINTS: Readonly<Record<AequiraNetwork, NetworkEndpoints>> = {
 };
 
 const DEFAULT_PROOF_SERVER = 'http://127.0.0.1:6300';
-const DEFAULT_PRIVATE_STATE_DIRECTORY = '.private-state/aequira';
+const DEFAULT_PRIVATE_STATE_DIRECTORY = fileURLToPath(
+  new URL('../../../.private-state/aequira/', import.meta.url),
+);
 const DEFAULT_ZK_CONFIG_PATH = fileURLToPath(
   new URL('../../contract/dist/managed/aequira/', import.meta.url),
 );
