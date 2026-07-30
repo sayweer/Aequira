@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const NETWORKS = ['preview', 'preprod'] as const;
@@ -80,6 +81,16 @@ const parseHttpUrl = (name: string, value: string): string => {
   return url.toString().replace(/\/$/, '');
 };
 
+const parsePrivateStateDirectory = (value: string): string => {
+  const directory = path.resolve(value);
+
+  if (directory === path.parse(directory).root) {
+    throw new Error('private state directory must not be a filesystem root');
+  }
+
+  return directory;
+};
+
 export type LoadCliConfigOptions = {
   readonly environment?: CliEnvironment;
   readonly network?: string;
@@ -93,7 +104,9 @@ export const loadCliConfig = (options: LoadCliConfigOptions = {}): CliConfig => 
 
   return {
     ...endpoints,
-    privateStateDirectory: environment.AEQUIRA_PRIVATE_STATE_DIR ?? DEFAULT_PRIVATE_STATE_DIRECTORY,
+    privateStateDirectory: parsePrivateStateDirectory(
+      environment.AEQUIRA_PRIVATE_STATE_DIR ?? DEFAULT_PRIVATE_STATE_DIRECTORY,
+    ),
     proofServer: parseHttpUrl(
       'proof server URL',
       options.proofServer ?? environment.AEQUIRA_PROOF_SERVER_URL ?? DEFAULT_PROOF_SERVER,

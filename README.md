@@ -36,7 +36,9 @@ AEQUIRA has its first L1 contract slice:
 - a deployable `CompiledContract` bundle containing the required ZK assets
 - a typed SDK for deploy, join, private-state validation, and ledger queries
 - a CLI configuration/doctor slice for Preview and Preprod
-- 18 local tests covering the contract, SDK inputs, and CLI safety
+- a Wallet SDK runtime with account-scoped encrypted private-state storage
+- 22 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+  storage, and CLI safety
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
 which pseudonymous reviewer acts. L2 will replace it with private Merkle

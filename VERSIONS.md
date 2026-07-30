@@ -26,11 +26,11 @@
 | `@midnight-ntwrk/compact-js`          | 2.5.1         | Installed through `midnight-js-protocol`               |
 | Platform JS                           | 2.2.4         | Installed through `midnight-js-protocol`               |
 | `midnight-js-protocol`                | 4.1.1         | Installed direct dependency                            |
-| `midnight-js-network-id`              | 4.1.1         | Installed development dependency                       |
-| Other `@midnight-ntwrk/midnight-js-*` | 4.1.1         | Add narrowly when CLI/UI integration begins            |
+| `midnight-js-network-id`              | 4.1.1         | Installed in contract tests and CLI runtime            |
+| Other `@midnight-ntwrk/midnight-js-*` | 4.1.1         | Narrow CLI provider dependencies installed             |
 | `@midnight-ntwrk/dapp-connector-api`  | 4.0.1         | Official matrix and current example; install pending   |
 | `@midnight-ntwrk/testkit-js`          | 4.1.1         | Official matrix and current example; install pending   |
-| Wallet SDK                            | 1.2.0         | Official compatibility matrix; L2 installation pending |
+| Wallet SDK                            | 1.2.0         | Installed direct CLI dependency                        |
 | Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
 | Preprod node                          | 1.0.0         | Official compatibility matrix; remote service          |
 | Midnight Indexer                      | 4.3.3         | Official compatibility matrix; remote service          |
@@ -48,6 +48,13 @@ Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
-The AEQUIRA L1 contract compiled 6 state-changing circuits and passed 9 local
-`node:test` simulator tests. `pnpm peers check`, the production audit, and the
-full dependency audit passed with no reported issues or known vulnerabilities.
+The AEQUIRA L1 contract compiled 6 state-changing circuits. The repository now
+passes 22 local `node:test` tests: 10 contract, 3 SDK, and 9 CLI/runtime tests.
+The CLI tests include encrypted-at-rest private-state checks, wrong-password
+failure, storage permission checks, seed consumption, and wallet lifecycle.
+
+`pnpm verify` and the production audit pass with no reported issues or known
+vulnerabilities. Native dependency scripts remain deny-by-default:
+`classic-level@3.0.0` alone is allowed because the encrypted LevelDB provider
+requires its N-API binding; the optional `msgpackr-extract` script remains
+disabled.
