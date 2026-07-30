@@ -4,6 +4,7 @@ import { parseCliArguments } from './arguments.js';
 import {
   runCommitScoreCommand,
   runDeployCommand,
+  runFundingStatusCommand,
   runJoinCommand,
   runPhaseCommand,
   runRegisterReviewerCommand,
@@ -21,6 +22,7 @@ Usage:
   aequira config [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira wallet-address [--network preview|preprod] [--json]
+  aequira funding-status [--network preview|preprod] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
@@ -65,6 +67,12 @@ const main = async (): Promise<void> => {
 
   if (args.command === 'wallet-address') {
     const result = await runWalletAddressCommand(config);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+    return;
+  }
+
+  if (args.command === 'funding-status') {
+    const result = await runFundingStatusCommand(config);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
     return;
   }

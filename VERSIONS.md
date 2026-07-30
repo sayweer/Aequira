@@ -49,15 +49,16 @@ does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
 The AEQUIRA L1 contract compiled 6 state-changing circuits. The repository now
-passes 46 local `node:test` tests: 10 contract, 4 SDK, and 32 CLI/runtime tests.
+passes 48 local `node:test` tests: 10 contract, 4 SDK, and 34 CLI/runtime tests.
 The CLI tests include encrypted-at-rest private-state checks, wrong-password
 failure, storage and backup permission checks, seed consumption, wallet
 lifecycle, prerequisite gating, secret cleanup, reviewer/admin orchestration,
 sealed-score transaction handling, and a real encrypted backup/restore
 round-trip through the Level provider. They also verify offline Preview/Preprod
-funding-address derivation and network-specific address prefixes. Backup format
-v2 authenticates its public network/address envelope with a password-derived
-HMAC.
+funding-address derivation, network-specific address prefixes, synchronized
+public funding-state reporting, and failure-path wallet cleanup with explicit
+ledger key clearing. Backup format v2 authenticates its public network/address
+envelope with a password-derived HMAC.
 
 `pnpm verify` and the production audit pass with no reported issues or known
 vulnerabilities. Native dependency scripts remain deny-by-default:

@@ -35,12 +35,13 @@ AEQUIRA has its first L1 contract slice:
 - score opening and per-application aggregation
 - a deployable `CompiledContract` bundle containing the required ZK assets
 - a typed SDK for deploy, join, private-state validation, and ledger queries
-- CLI configuration, offline funding-address derivation, diagnostics, deploy,
-  join, sealed-score commit, and score reveal commands for Preview and Preprod
+- CLI configuration, offline funding-address derivation, network-synced funding
+  status, diagnostics, deploy, join, sealed-score commit, and score reveal
+  commands for Preview and Preprod
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, password-authenticated, non-overwriting runtime backups with
   restrictive filesystem permissions
-- 46 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+- 48 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
   storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
@@ -85,6 +86,19 @@ pnpm --filter @aequira/cli start wallet-address --network preprod
 The command reads the wallet seed through a masked prompt, prints only the public
 address, and does not start the wallet network client or require the local
 private-state password.
+
+After using the selected network's faucet, synchronize the wallet and inspect its
+public funding state:
+
+```bash
+pnpm --filter @aequira/cli start funding-status --network preprod
+```
+
+This command also uses only the masked wallet seed. It connects to the selected
+network, returns NIGHT and Dust balances as atomic-unit strings, and always closes
+the wallet while clearing its derived SDK key material. `hasDust` reports only
+whether the current Dust balance is positive; it does not guarantee that the
+balance covers a particular transaction.
 
 Start the matrix-pinned proof server on the loopback interface:
 

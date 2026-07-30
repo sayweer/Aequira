@@ -5,6 +5,7 @@ export const COMMANDS = [
   'config',
   'deploy',
   'doctor',
+  'funding-status',
   'help',
   'join',
   'open-applications',

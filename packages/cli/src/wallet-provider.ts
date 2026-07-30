@@ -7,6 +7,7 @@ import {
   DustSecretKey,
   LedgerParameters,
   ZswapSecretKeys,
+  unshieldedToken,
   type CoinPublicKey,
   type EncPublicKey,
   type FinalizedTransaction,
@@ -52,6 +53,7 @@ type DerivedWalletKeys = {
   readonly dustSecretKey: DustSecretKey;
   readonly shieldedSecretKeys: ZswapSecretKeys;
   readonly unshieldedKeystore: UnshieldedKeystore;
+  readonly unshieldedSecretKey: Uint8Array;
 };
 
 export type WalletProviderDependencies = {
@@ -90,6 +92,7 @@ const deriveWalletKeys = (
       dustSecretKey: DustSecretKey.fromSeed(dustSeed),
       shieldedSecretKeys: ZswapSecretKeys.fromSeed(shieldedSeed),
       unshieldedKeystore,
+      unshieldedSecretKey: unshieldedKey,
     };
   } finally {
     hdWallet.clear();
@@ -128,6 +131,31 @@ export const deriveUnshieldedAddress = (config: CliConfig, walletSeed: Uint8Arra
   }
 };
 
+export type WalletFundingState = {
+  readonly dustBalance: bigint;
+  readonly nightBalance: bigint;
+};
+
+const clearDerivedWalletKeys = (keys: DerivedWalletKeys): void => {
+  const errors: unknown[] = [];
+
+  for (const clear of [
+    () => keys.dustSecretKey.clear(),
+    () => keys.shieldedSecretKeys.clear(),
+    () => keys.unshieldedSecretKey.fill(0),
+  ]) {
+    try {
+      clear();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new AggregateError(errors, 'Derived wallet secrets could not be cleared');
+  }
+};
+
 export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
   readonly accountId: string;
   readonly wallet: WalletFacade;
@@ -135,6 +163,7 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
   #dustSecretKey: DustSecretKey | undefined;
   #shieldedSecretKeys: ZswapSecretKeys | undefined;
   #unshieldedKeystore: UnshieldedKeystore | undefined;
+  #unshieldedSecretKey: Uint8Array | undefined;
   #started = false;
   #stopped = false;
 
@@ -144,6 +173,7 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
     this.#dustSecretKey = keys.dustSecretKey;
     this.#shieldedSecretKeys = keys.shieldedSecretKeys;
     this.#unshieldedKeystore = keys.unshieldedKeystore;
+    this.#unshieldedSecretKey = keys.unshieldedSecretKey;
   }
 
   static async create(
@@ -159,41 +189,53 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
       walletSeed.fill(0);
     }
 
-    const publicKey = PublicKey.fromKeyStore(keys.unshieldedKeystore);
-    const walletConfiguration: DefaultConfiguration = {
-      networkId: config.walletNetworkId,
-      costParameters: {
-        feeBlocksMargin: 5,
-      },
-      relayURL: new URL(config.nodeWs),
-      provingServerUrl: new URL(config.proofServer),
-      indexerClientConnection: {
-        indexerHttpUrl: config.indexer,
-        indexerWsUrl: config.indexerWs,
-      },
-      txHistoryStorage: new InMemoryTransactionHistoryStorage(
-        WalletEntrySchema,
-        mergeWalletEntries,
-      ),
-    };
+    try {
+      const publicKey = PublicKey.fromKeyStore(keys.unshieldedKeystore);
+      const walletConfiguration: DefaultConfiguration = {
+        networkId: config.walletNetworkId,
+        costParameters: {
+          feeBlocksMargin: 5,
+        },
+        relayURL: new URL(config.nodeWs),
+        provingServerUrl: new URL(config.proofServer),
+        indexerClientConnection: {
+          indexerHttpUrl: config.indexer,
+          indexerWsUrl: config.indexerWs,
+        },
+        txHistoryStorage: new InMemoryTransactionHistoryStorage(
+          WalletEntrySchema,
+          mergeWalletEntries,
+        ),
+      };
 
-    const wallet =
-      dependencies.createWallet === undefined
-        ? await WalletFacade.init({
-            configuration: walletConfiguration,
-            shielded: (walletConfig) =>
-              ShieldedWallet(walletConfig).startWithSecretKeys(keys.shieldedSecretKeys),
-            unshielded: (walletConfig) =>
-              UnshieldedWallet(walletConfig).startWithPublicKey(publicKey),
-            dust: (walletConfig) =>
-              DustWallet(walletConfig).startWithSecretKey(
-                keys.dustSecretKey,
-                LedgerParameters.initialParameters().dust,
-              ),
-          })
-        : await dependencies.createWallet();
+      const wallet =
+        dependencies.createWallet === undefined
+          ? await WalletFacade.init({
+              configuration: walletConfiguration,
+              shielded: (walletConfig) =>
+                ShieldedWallet(walletConfig).startWithSecretKeys(keys.shieldedSecretKeys),
+              unshielded: (walletConfig) =>
+                UnshieldedWallet(walletConfig).startWithPublicKey(publicKey),
+              dust: (walletConfig) =>
+                DustWallet(walletConfig).startWithSecretKey(
+                  keys.dustSecretKey,
+                  LedgerParameters.initialParameters().dust,
+                ),
+            })
+          : await dependencies.createWallet();
 
-    return new AequiraWalletProvider(wallet, keys, publicKey.address);
+      return new AequiraWalletProvider(wallet, keys, publicKey.address);
+    } catch (error) {
+      try {
+        clearDerivedWalletKeys(keys);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Wallet initialization failed and secret cleanup was incomplete',
+        );
+      }
+      throw error;
+    }
   }
 
   getCoinPublicKey(): CoinPublicKey {
@@ -245,6 +287,19 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
     await this.wallet.waitForSyncedState();
   }
 
+  async waitForFundingState(): Promise<WalletFundingState> {
+    if (!this.#started) {
+      throw new Error('Wallet must be started before reading its funding state');
+    }
+
+    const state = await this.wallet.waitForSyncedState();
+
+    return {
+      dustBalance: state.dust.balance(new Date()),
+      nightBalance: state.unshielded.balances[unshieldedToken().raw] ?? 0n,
+    };
+  }
+
   async stop(): Promise<void> {
     if (this.#stopped) {
       return;
@@ -252,13 +307,34 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
 
     this.#stopped = true;
 
+    const errors: unknown[] = [];
+
     try {
       await this.wallet.stop();
-    } finally {
-      this.#started = false;
-      this.#dustSecretKey = undefined;
-      this.#shieldedSecretKeys = undefined;
-      this.#unshieldedKeystore = undefined;
+    } catch (error) {
+      errors.push(error);
+    }
+
+    for (const clear of [
+      () => this.#dustSecretKey?.clear(),
+      () => this.#shieldedSecretKeys?.clear(),
+      () => this.#unshieldedSecretKey?.fill(0),
+    ]) {
+      try {
+        clear();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+
+    this.#started = false;
+    this.#dustSecretKey = undefined;
+    this.#shieldedSecretKeys = undefined;
+    this.#unshieldedKeystore = undefined;
+    this.#unshieldedSecretKey = undefined;
+
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Wallet provider could not stop cleanly');
     }
   }
 

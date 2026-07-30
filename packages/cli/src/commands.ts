@@ -30,7 +30,7 @@ import {
   type RuntimeSecrets,
   type SecretPrompt,
 } from './secret-input.js';
-import { deriveUnshieldedAddress } from './wallet-provider.js';
+import { AequiraWalletProvider, deriveUnshieldedAddress } from './wallet-provider.js';
 
 const BYTES32_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 const SCORE_PATTERN = /^(?:0|[1-9][0-9]{0,2})$/;
@@ -86,6 +86,7 @@ const createFreshPrivateState = (): AequiraPrivateState =>
   createAequiraPrivateState(randomBytes(32), randomBytes(32), 0n, randomBytes(32));
 
 export type CommandDependencies = {
+  readonly createWalletProvider?: typeof AequiraWalletProvider.create;
   readonly createRuntime?: typeof createAequiraRuntime;
   readonly deriveWalletAddress?: typeof deriveUnshieldedAddress;
   readonly deployContract?: typeof deployAequira;
@@ -257,6 +258,14 @@ export type WalletAddressCommandResult = {
   readonly unshieldedAddress: string;
 };
 
+export type FundingStatusCommandResult = {
+  readonly dustBalance: string;
+  readonly hasDust: boolean;
+  readonly network: CliConfig['network'];
+  readonly nightBalance: string;
+  readonly unshieldedAddress: string;
+};
+
 export const runWalletAddressCommand = async (
   config: CliConfig,
   dependencies: CommandDependencies = {},
@@ -276,6 +285,35 @@ export const runWalletAddressCommand = async (
     };
   } finally {
     walletSeed.fill(0);
+  }
+};
+
+export const runFundingStatusCommand = async (
+  config: CliConfig,
+  dependencies: CommandDependencies = {},
+): Promise<FundingStatusCommandResult> => {
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+  let wallet: AequiraWalletProvider | undefined;
+
+  try {
+    wallet = await (dependencies.createWalletProvider ?? AequiraWalletProvider.create)(
+      config,
+      walletSeed,
+    );
+    await wallet.start();
+    const fundingState = await wallet.waitForFundingState();
+
+    return {
+      dustBalance: fundingState.dustBalance.toString(),
+      hasDust: fundingState.dustBalance > 0n,
+      network: config.network,
+      nightBalance: fundingState.nightBalance.toString(),
+      unshieldedAddress: wallet.accountId,
+    };
+  } finally {
+    walletSeed.fill(0);
+    await wallet?.stop();
   }
 };
 
