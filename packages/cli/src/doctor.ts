@@ -79,26 +79,28 @@ const checkZkAssets = async (
   }
 };
 
-const checkProofServer = async (
-  config: CliConfig,
+const checkHttpService = async (
+  name: string,
+  label: string,
+  url: string,
   fetchUrl: typeof fetch,
 ): Promise<DoctorCheck> => {
   try {
-    const response = await fetchUrl(config.proofServer, {
+    const response = await fetchUrl(url, {
       method: 'GET',
       signal: AbortSignal.timeout(3_000),
     });
 
     return {
-      name: 'proof-server',
+      name,
       ok: true,
-      detail: `Proof server responded with HTTP ${response.status}`,
+      detail: `${label} responded with HTTP ${response.status}`,
     };
   } catch {
     return {
-      name: 'proof-server',
+      name,
       ok: false,
-      detail: `Proof server is unreachable at ${config.proofServer}`,
+      detail: `${label} is unreachable at ${url}`,
     };
   }
 };
@@ -115,6 +117,8 @@ export const runDoctor = async (
   return Promise.all([
     Promise.resolve(checkNodeVersion(nodeVersion)),
     checkZkAssets(config, accessFile),
-    checkProofServer(config, fetchUrl),
+    checkHttpService('network-node', 'Network node', config.node, fetchUrl),
+    checkHttpService('indexer', 'Indexer', config.indexer, fetchUrl),
+    checkHttpService('proof-server', 'Proof server', config.proofServer, fetchUrl),
   ]);
 };

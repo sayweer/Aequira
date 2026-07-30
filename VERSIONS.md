@@ -65,4 +65,5 @@ network/address envelope with a password-derived HMAC.
 vulnerabilities. Native dependency scripts remain deny-by-default:
 `classic-level@3.0.0` alone is allowed because the encrypted LevelDB provider
 requires its N-API binding; the optional `msgpackr-extract` script remains
-disabled.
+disabled. CLI diagnostics independently report selected-network node, indexer,
+and local proof-server reachability before deploy secrets are requested.

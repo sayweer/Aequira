@@ -131,7 +131,8 @@ Inspect the public Preprod configuration:
 pnpm --filter @aequira/cli start config --network preprod --json
 ```
 
-Check Node, compiled ZK assets, and the local proof server:
+Check Node.js, compiled ZK assets, the selected network node and indexer, and the
+local proof server:
 
 ```bash
 pnpm --filter @aequira/cli doctor
