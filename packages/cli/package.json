@@ -19,9 +19,9 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "doctor": "pnpm run build && node dist/main.js doctor",
-    "start": "pnpm run build && node dist/main.js",
-    "test": "pnpm run build && node --test",
+    "doctor": "tsc --project tsconfig.build.json && node dist/main.js doctor",
+    "start": "tsc --project tsconfig.build.json && node dist/main.js",
+    "test": "tsc --project tsconfig.build.json && node --test",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
