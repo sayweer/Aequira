@@ -35,13 +35,13 @@ AEQUIRA has its first L1 contract slice:
 - score opening and per-application aggregation
 - a deployable `CompiledContract` bundle containing the required ZK assets
 - a typed SDK for deploy, join, private-state validation, and ledger queries
-- CLI configuration, diagnostics, deploy, and join commands for Preview and
-  Preprod
+- CLI configuration, diagnostics, deploy, join, sealed-score commit, and score
+  reveal commands for Preview and Preprod
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, non-overwriting runtime backups with restrictive filesystem
   permissions
-- 33 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
-  storage, backup safety, and deploy/join orchestration
+- 37 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+  storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
 which pseudonymous reviewer acts. L2 will replace it with private Merkle
@@ -98,10 +98,24 @@ Join an existing deployment:
 pnpm --filter @aequira/cli start join --network preprod --contract-address CONTRACT_ADDRESS
 ```
 
-Deploy and join prompt for the wallet seed and private-state password through an
-interactive, masked terminal input. Successful commands create an encrypted
-backup under the ignored private-state directory. The backup does not contain
-the wallet seed; preserve the seed and storage password separately.
+Commit a score during the review phase:
+
+```bash
+pnpm --filter @aequira/cli start commit-score --network preprod --contract-address CONTRACT_ADDRESS --application-id APPLICATION_ID_64_HEX
+```
+
+Reveal the same score during the reveal phase:
+
+```bash
+pnpm --filter @aequira/cli start reveal-score --network preprod --contract-address CONTRACT_ADDRESS --application-id APPLICATION_ID_64_HEX
+```
+
+State-changing commands prompt for the wallet seed and private-state password
+through an interactive, masked terminal input. `commit-score` also prompts for
+the private score and generates its salt internally; neither value is accepted
+through process arguments. Successful commands create an encrypted backup under
+the ignored private-state directory. The backup does not contain the wallet
+seed; preserve the seed and storage password separately.
 
 The CLI intentionally rejects wallet seeds, private keys, passwords, and
 contract secrets passed as command-line arguments.

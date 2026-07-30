@@ -1,10 +1,19 @@
 import type { AequiraNetwork } from './config.js';
 
-export const COMMANDS = ['config', 'deploy', 'doctor', 'help', 'join'] as const;
+export const COMMANDS = [
+  'commit-score',
+  'config',
+  'deploy',
+  'doctor',
+  'help',
+  'join',
+  'reveal-score',
+] as const;
 
 export type CliCommand = (typeof COMMANDS)[number];
 
 export type CliArguments = {
+  readonly applicationId?: string;
   readonly command: CliCommand;
   readonly contractAddress?: string;
   readonly json: boolean;
@@ -19,6 +28,7 @@ const SENSITIVE_OPTIONS = new Set([
   '--password',
   '--private-key',
   '--reviewer-secret',
+  '--score',
   '--score-salt',
   '--seed',
   '--wallet-seed',
@@ -50,6 +60,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   }
 
   let json = false;
+  let applicationId: string | undefined;
   let contractAddress: string | undefined;
   let network: AequiraNetwork | undefined;
   let proofServer: string | undefined;
@@ -98,8 +109,18 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--application-id') {
+      applicationId = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option "${option}"`);
   }
+
+  const requiresContractAddress =
+    commandValue === 'commit-score' || commandValue === 'join' || commandValue === 'reveal-score';
+  const requiresApplicationId = commandValue === 'commit-score' || commandValue === 'reveal-score';
 
   if (commandValue === 'deploy' && roundId === undefined) {
     throw new Error('deploy requires --round-id');
@@ -109,17 +130,26 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--round-id is only valid with deploy');
   }
 
-  if (commandValue === 'join' && contractAddress === undefined) {
-    throw new Error('join requires --contract-address');
+  if (requiresContractAddress && contractAddress === undefined) {
+    throw new Error(`${commandValue} requires --contract-address`);
   }
 
-  if (commandValue !== 'join' && contractAddress !== undefined) {
-    throw new Error('--contract-address is only valid with join');
+  if (!requiresContractAddress && contractAddress !== undefined) {
+    throw new Error('--contract-address is only valid with commit-score, join, or reveal-score');
+  }
+
+  if (requiresApplicationId && applicationId === undefined) {
+    throw new Error(`${commandValue} requires --application-id`);
+  }
+
+  if (!requiresApplicationId && applicationId !== undefined) {
+    throw new Error('--application-id is only valid with commit-score or reveal-score');
   }
 
   return {
     command: commandValue as CliCommand,
     json,
+    ...(applicationId === undefined ? {} : { applicationId }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
     ...(network === undefined ? {} : { network }),
     ...(proofServer === undefined ? {} : { proofServer }),

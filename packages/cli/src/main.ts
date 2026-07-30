@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
 import { parseCliArguments } from './arguments.js';
-import { runDeployCommand, runJoinCommand } from './commands.js';
+import {
+  runCommitScoreCommand,
+  runDeployCommand,
+  runJoinCommand,
+  runRevealScoreCommand,
+} from './commands.js';
 import { loadCliConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { redactErrorMessage } from './errors.js';
@@ -13,13 +18,21 @@ Usage:
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira commit-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
+  aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
-Deploy and join require an interactive TTY for masked secret entry.
+State-changing commands require an interactive TTY for masked secret entry.
 `;
 
 const write = (value: string): void => {
   process.stdout.write(`${value}\n`);
+};
+
+const writeBackupReminder = (): void => {
+  write(
+    'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
+  );
 };
 
 const main = async (): Promise<void> => {
@@ -49,9 +62,7 @@ const main = async (): Promise<void> => {
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {
-      write(
-        'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
-      );
+      writeBackupReminder();
     }
     return;
   }
@@ -65,9 +76,24 @@ const main = async (): Promise<void> => {
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {
-      write(
-        'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
-      );
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (args.command === 'commit-score' || args.command === 'reveal-score') {
+    if (args.contractAddress === undefined || args.applicationId === undefined) {
+      throw new Error(`${args.command} requires --contract-address and --application-id`);
+    }
+
+    const result =
+      args.command === 'commit-score'
+        ? await runCommitScoreCommand(config, args.contractAddress, args.applicationId)
+        : await runRevealScoreCommand(config, args.contractAddress, args.applicationId);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      writeBackupReminder();
     }
     return;
   }
