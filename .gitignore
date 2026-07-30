@@ -100,6 +100,8 @@ out/
 # Midnight / Compact generated artifacts and private state
 **/src/managed/
 **/public/zk/
+**/public/keys/
+**/public/zkir/
 *.zkir
 *.prover
 *.verifier

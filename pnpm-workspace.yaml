@@ -1,6 +1,7 @@
 packages:
   - packages/*
 allowBuilds:
+  '@swc/core': true
   classic-level: true
   esbuild: true
   msgpackr-extract: false

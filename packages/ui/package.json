@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --project tsconfig.json && vite build",
-    "dev": "vite",
+    "build": "node scripts/prepare-zk-assets.mjs && tsc --project tsconfig.json && vite build",
+    "dev": "node scripts/prepare-zk-assets.mjs && vite",
     "preview": "vite preview",
     "test": "tsc --project tsconfig.test-build.json && node --test",
     "typecheck": "tsc --project tsconfig.json --noEmit"
@@ -14,14 +14,32 @@
     "node": ">=24.11.1"
   },
   "dependencies": {
+    "@aequira/sdk": "workspace:*",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-network-id": "4.1.1",
+    "@midnight-ntwrk/midnight-js-protocol": "4.1.1",
+    "@midnight-ntwrk/midnight-js-types": "4.1.1",
+    "@midnight-ntwrk/midnight-js-utils": "4.1.1",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
+    "assert": "2.1.0",
+    "buffer": "6.0.3",
+    "events": "3.3.0",
+    "process": "0.11.10",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "util": "0.12.5"
   },
   "devDependencies": {
     "@types/react": "19.0.8",
     "@types/react-dom": "19.0.3",
     "@vitejs/plugin-react": "5.1.4",
-    "vite": "7.3.1"
+    "vite": "7.3.1",
+    "vite-plugin-top-level-await": "1.6.0",
+    "vite-plugin-wasm": "3.5.0"
   }
 }

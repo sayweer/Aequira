@@ -9,5 +9,5 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/wallet.ts"]
+  "include": ["src/deployment-errors.ts", "src/provider-security.ts", "src/wallet.ts"]
 }

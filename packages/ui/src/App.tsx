@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { deployNewAequira, type BrowserAequiraDeployment } from './deployment.js';
+import { getPrivateStatePasswordError, toDeploymentErrorMessage } from './deployment-errors.js';
 import {
   AEQUIRA_NETWORK_ID,
   LACE_INSTALL_URL,
@@ -12,6 +14,7 @@ import {
 } from './wallet.js';
 
 type WalletViewState = 'connected' | 'connecting' | 'detecting' | 'error' | 'no-wallet' | 'ready';
+type DeploymentViewState = 'deployed' | 'deploying' | 'error' | 'idle';
 
 const DETECTION_INTERVAL_MS = 250;
 const DETECTION_TIMEOUT_MS = 5_000;
@@ -24,6 +27,43 @@ const App = () => {
   const [connectedWallet, setConnectedWallet] = useState<ConnectedWallet | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detectionAttempt, setDetectionAttempt] = useState(0);
+  const [deploymentState, setDeploymentState] = useState<DeploymentViewState>('idle');
+  const [deploymentAddress, setDeploymentAddress] = useState<string | null>(null);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
+  const [privateStatePassword, setPrivateStatePassword] = useState('');
+  const [privateStatePasswordConfirmation, setPrivateStatePasswordConfirmation] = useState('');
+  const deploymentRef = useRef<BrowserAequiraDeployment | null>(null);
+  const deploymentAttemptRef = useRef(0);
+
+  const clearDeploymentSession = useCallback(() => {
+    deploymentAttemptRef.current += 1;
+    const deployment = deploymentRef.current;
+    deploymentRef.current = null;
+    setDeploymentAddress(null);
+    setDeploymentError(null);
+    setDeploymentState('idle');
+    setPrivateStatePassword('');
+    setPrivateStatePasswordConfirmation('');
+
+    if (deployment !== null) {
+      void deployment.session.close().catch(() => {
+        // The in-memory password is already cleared before cache invalidation is attempted.
+      });
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      deploymentAttemptRef.current += 1;
+      const deployment = deploymentRef.current;
+      deploymentRef.current = null;
+
+      if (deployment !== null) {
+        void deployment.session.close();
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     let elapsed = 0;
@@ -82,6 +122,7 @@ const App = () => {
         .getConnectionStatus()
         .then((status) => {
           if (active && status.status !== 'connected') {
+            clearDeploymentSession();
             setConnectedWallet(null);
             setErrorMessage(null);
             setViewState('ready');
@@ -96,7 +137,7 @@ const App = () => {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [connectedWallet]);
+  }, [clearDeploymentSession, connectedWallet]);
 
   const selectedWallet = useMemo(
     () => wallets.find((wallet) => wallet.id === selectedWalletId) ?? null,
@@ -122,11 +163,56 @@ const App = () => {
     }
   }, [selectedWallet, viewState]);
 
+  const deploy = useCallback(async () => {
+    if (connectedWallet === null || deploymentState === 'deploying') {
+      return;
+    }
+
+    const passwordError = getPrivateStatePasswordError(
+      privateStatePassword,
+      privateStatePasswordConfirmation,
+    );
+    if (passwordError !== null) {
+      setDeploymentError(passwordError);
+      setDeploymentState('error');
+      return;
+    }
+
+    setDeploymentError(null);
+    setDeploymentState('deploying');
+    const deploymentAttempt = deploymentAttemptRef.current + 1;
+    deploymentAttemptRef.current = deploymentAttempt;
+
+    try {
+      const deployment = await deployNewAequira(connectedWallet.api, privateStatePassword);
+
+      if (deploymentAttemptRef.current !== deploymentAttempt) {
+        await deployment.session.close();
+        return;
+      }
+
+      deploymentRef.current = deployment;
+      setDeploymentAddress(deployment.address);
+      setPrivateStatePassword('');
+      setPrivateStatePasswordConfirmation('');
+      setDeploymentState('deployed');
+    } catch (error) {
+      if (deploymentAttemptRef.current !== deploymentAttempt) {
+        return;
+      }
+
+      setDeploymentAddress(null);
+      setDeploymentError(toDeploymentErrorMessage(error));
+      setDeploymentState('error');
+    }
+  }, [connectedWallet, deploymentState, privateStatePassword, privateStatePasswordConfirmation]);
+
   const disconnect = useCallback(() => {
+    clearDeploymentSession();
     setConnectedWallet(null);
     setErrorMessage(null);
     setViewState('ready');
-  }, []);
+  }, [clearDeploymentSession]);
 
   const retryDetection = useCallback(() => {
     setErrorMessage(null);
@@ -140,6 +226,7 @@ const App = () => {
   }, []);
 
   const isConnected = viewState === 'connected' && connectedWallet !== null;
+  const isDeployed = deploymentState === 'deployed' && deploymentAddress !== null;
 
   return (
     <div className="app-shell">
@@ -176,18 +263,36 @@ const App = () => {
                   </small>
                 </span>
               </li>
-              <li className="flow-step">
+              <li
+                className={
+                  isDeployed
+                    ? 'flow-step is-complete'
+                    : isConnected
+                      ? 'flow-step is-current'
+                      : 'flow-step'
+                }
+              >
                 <span className="step-index">02</span>
                 <span>
                   <strong>Resolve contract</strong>
-                  <small>Next implementation slice</small>
+                  <small>
+                    {isDeployed
+                      ? 'Preprod address confirmed'
+                      : isConnected
+                        ? 'Ready for Lace deployment'
+                        : 'Connect Lace first'}
+                  </small>
                 </span>
               </li>
-              <li className="flow-step">
+              <li className={isDeployed ? 'flow-step is-current' : 'flow-step'}>
                 <span className="step-index">03</span>
                 <span>
                   <strong>Commit private score</strong>
-                  <small>Only the salted commitment becomes public</small>
+                  <small>
+                    {isDeployed
+                      ? 'Next: call the private score circuit'
+                      : 'Only the salted commitment becomes public'}
+                  </small>
                 </span>
               </li>
             </ol>
@@ -334,8 +439,97 @@ const App = () => {
                   </div>
                 </dl>
 
+                <section className="deployment-card" aria-labelledby="deployment-heading">
+                  <div className="deployment-heading">
+                    <div>
+                      <p className="panel-kicker">Contract workspace</p>
+                      <h3 id="deployment-heading">
+                        {isDeployed ? 'Contract deployed' : 'Deploy AEQUIRA'}
+                      </h3>
+                    </div>
+                    <span
+                      className={`deployment-status deployment-status-${deploymentState}`}
+                      aria-live="polite"
+                    >
+                      {isDeployed
+                        ? 'Preprod'
+                        : deploymentState === 'deploying'
+                          ? 'In progress'
+                          : 'Not deployed'}
+                    </span>
+                  </div>
+
+                  {isDeployed ? (
+                    <div className="deployment-success">
+                      <span>Verifiable contract address</span>
+                      <strong>{deploymentAddress}</strong>
+                      <p>
+                        The address is public. Admin and reviewer secrets remain encrypted in this
+                        browser.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="deployment-copy">
+                        Choose a local-only password before deployment. It encrypts AEQUIRA private
+                        state in this browser and is never sent to Lace or the network.
+                      </p>
+
+                      <div className="password-grid">
+                        <label>
+                          <span>Local storage password</span>
+                          <input
+                            autoComplete="new-password"
+                            disabled={deploymentState === 'deploying'}
+                            minLength={16}
+                            onChange={(event) => setPrivateStatePassword(event.target.value)}
+                            type="password"
+                            value={privateStatePassword}
+                          />
+                        </label>
+                        <label>
+                          <span>Confirm password</span>
+                          <input
+                            autoComplete="new-password"
+                            disabled={deploymentState === 'deploying'}
+                            minLength={16}
+                            onChange={(event) =>
+                              setPrivateStatePasswordConfirmation(event.target.value)
+                            }
+                            type="password"
+                            value={privateStatePasswordConfirmation}
+                          />
+                        </label>
+                      </div>
+
+                      {deploymentError !== null && (
+                        <div className="error-message deployment-error" role="alert">
+                          <strong>Deployment needs attention</strong>
+                          <p>{deploymentError}</p>
+                        </div>
+                      )}
+
+                      <button
+                        aria-busy={deploymentState === 'deploying'}
+                        className="button button-primary button-full deployment-button"
+                        disabled={deploymentState === 'deploying'}
+                        onClick={() => void deploy()}
+                        type="button"
+                      >
+                        {deploymentState === 'deploying'
+                          ? 'Proving and awaiting Lace…'
+                          : 'Deploy to Preprod'}
+                      </button>
+                      <p className="privacy-note deployment-note">
+                        Lace will show the tDUST-funded transaction before it is submitted.
+                      </p>
+                    </>
+                  )}
+                </section>
+
                 <button
                   className="button button-secondary button-full"
+                  disabled={deploymentState === 'deploying'}
                   type="button"
                   onClick={disconnect}
                 >

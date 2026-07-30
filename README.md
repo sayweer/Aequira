@@ -83,8 +83,14 @@ Open `http://127.0.0.1:3000` in Chrome with Lace installed and configured for
 Midnight Preprod. The current browser slice discovers every wallet injected
 under `window.midnight`, lets the user choose when multiple wallets are
 available, requests a Preprod connection, validates the returned unshielded
-address, and supports clearing the page session through Disconnect. No wallet
-secret or seed is read by the application.
+address, and supports clearing the page session through Disconnect.
+
+After connecting, the UI can deploy AEQUIRA through Lace. Start the local proof
+server with `pnpm proof-server:up`, choose a strong local storage password, and
+select **Deploy to Preprod**. The password never leaves the browser. The
+encrypted browser state contains the generated admin/reviewer secrets, while
+only the contract address and transaction data become public. Generated ZK
+assets are copied into the local UI build and remain ignored by Git.
 
 Compile only the Compact contract:
 
