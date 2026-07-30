@@ -5,6 +5,8 @@ import {
   runCommitScoreCommand,
   runDeployCommand,
   runJoinCommand,
+  runPhaseCommand,
+  runRegisterReviewerCommand,
   runRevealScoreCommand,
 } from './commands.js';
 import { loadCliConfig } from './config.js';
@@ -18,6 +20,10 @@ Usage:
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira register-reviewer --contract-address ADDRESS --reviewer-id 64_HEX [--network preview|preprod] [--json]
+  aequira open-applications --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira open-review --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira open-reveal --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira commit-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
   aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
 
@@ -90,6 +96,38 @@ const main = async (): Promise<void> => {
       args.command === 'commit-score'
         ? await runCommitScoreCommand(config, args.contractAddress, args.applicationId)
         : await runRevealScoreCommand(config, args.contractAddress, args.applicationId);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (args.command === 'register-reviewer') {
+    if (args.contractAddress === undefined || args.reviewerId === undefined) {
+      throw new Error('register-reviewer requires --contract-address and --reviewer-id');
+    }
+
+    const result = await runRegisterReviewerCommand(config, args.contractAddress, args.reviewerId);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (
+    args.command === 'open-applications' ||
+    args.command === 'open-review' ||
+    args.command === 'open-reveal'
+  ) {
+    if (args.contractAddress === undefined) {
+      throw new Error(`${args.command} requires --contract-address`);
+    }
+
+    const result = await runPhaseCommand(config, args.contractAddress, args.command);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {

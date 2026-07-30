@@ -4,6 +4,7 @@ import {
   AEQUIRA_PRIVATE_STATE_ID,
   createAequiraPrivateState,
   deployAequira,
+  deriveReviewerId,
   joinAequira,
   setAequiraPrivateState,
   validateAequiraPrivateState,
@@ -101,6 +102,14 @@ export type DeployCommandResult = {
   readonly contractAddress: ContractAddress;
 };
 
+export type AequiraCallName =
+  | 'commitScore'
+  | 'openApplications'
+  | 'openReveal'
+  | 'openReview'
+  | 'registerReviewer'
+  | 'revealScore';
+
 export class DeploymentBackupError extends Error {
   override readonly name = 'DeploymentBackupError';
   readonly contractAddress: ContractAddress;
@@ -122,7 +131,7 @@ export class FinalizedCallBackupError extends Error {
   constructor(
     contractAddress: ContractAddress,
     transactionId: string,
-    circuit: 'commitScore' | 'revealScore',
+    circuit: AequiraCallName,
     cause: unknown,
   ) {
     super(
@@ -149,7 +158,7 @@ const toTransactionCommandResult = (
 const writeFinalizedCallBackup = async (
   config: CliConfig,
   contractAddress: ContractAddress,
-  circuit: 'commitScore' | 'revealScore',
+  circuit: AequiraCallName,
   transaction: FinalizedTxData,
   runtime: AequiraRuntime,
   writeBackup: typeof writeRuntimeBackup,
@@ -220,6 +229,7 @@ export type JoinCommandResult = {
   readonly backupPath: string;
   readonly contractAddress: ContractAddress;
   readonly initializedPrivateState: boolean;
+  readonly reviewerId: string;
 };
 
 export const runJoinCommand = async (
@@ -232,6 +242,7 @@ export const runJoinCommand = async (
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
   const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  let existingPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
   let initialPrivateState: AequiraPrivateState | undefined;
 
@@ -245,9 +256,17 @@ export const runJoinCommand = async (
     await runtime.wallet.waitForSync();
 
     runtime.providers.privateStateProvider.setContractAddress(contractAddress);
-    const existingPrivateState =
+    const storedPrivateState =
       await runtime.providers.privateStateProvider.get(AEQUIRA_PRIVATE_STATE_ID);
-    initialPrivateState = existingPrivateState === null ? createFreshPrivateState() : undefined;
+    existingPrivateState = storedPrivateState ?? undefined;
+    initialPrivateState = storedPrivateState === null ? createFreshPrivateState() : undefined;
+    const activePrivateState = existingPrivateState ?? initialPrivateState;
+
+    if (activePrivateState === undefined) {
+      throw new Error('Unable to initialize local private state');
+    }
+
+    validateAequiraPrivateState(activePrivateState);
     await (dependencies.joinContract ?? joinAequira)(
       runtime.providers,
       initialPrivateState === undefined
@@ -264,8 +283,12 @@ export const runJoinCommand = async (
       contractAddress,
       backupPath,
       initializedPrivateState: initialPrivateState !== undefined,
+      reviewerId: Buffer.from(deriveReviewerId(activePrivateState.reviewerSecret)).toString('hex'),
     };
   } finally {
+    if (existingPrivateState !== undefined) {
+      clearPrivateState(existingPrivateState);
+    }
     if (initialPrivateState !== undefined) {
       clearPrivateState(initialPrivateState);
     }
@@ -284,7 +307,7 @@ const readExistingPrivateState = async (
 
   if (privateState === null) {
     throw new Error(
-      `No local private state exists for ${contractAddress}; run join before submitting a score`,
+      `No local private state exists for ${contractAddress}; run join before submitting a contract call`,
     );
   }
 
@@ -300,6 +323,60 @@ const joinForCall = async (
   joinContract(runtime.providers, {
     contractAddress,
   });
+
+type SubmitContractCall = (
+  contract: FoundAequiraContract,
+) => Promise<{ readonly public: FinalizedTxData }>;
+
+const runExistingPrivateStateCall = async (
+  config: CliConfig,
+  contractAddress: ContractAddress,
+  circuit: AequiraCallName,
+  submitCall: SubmitContractCall,
+  dependencies: CommandDependencies,
+): Promise<TransactionCommandResult> => {
+  const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
+  assertDoctorReady(checks);
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  let currentPrivateState: AequiraPrivateState | undefined;
+  let runtime: AequiraRuntime | undefined;
+
+  try {
+    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+      config,
+      privateStatePassword: secrets.privateStatePassword,
+      walletSeed: secrets.walletSeed,
+    });
+    await runtime.wallet.start();
+    await runtime.wallet.waitForSync();
+
+    const contract = await joinForCall(
+      runtime,
+      contractAddress,
+      dependencies.joinContract ?? joinAequira,
+    );
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
+    const txData = await submitCall(contract);
+    const backupPath = await writeFinalizedCallBackup(
+      config,
+      contractAddress,
+      circuit,
+      txData.public,
+      runtime,
+      dependencies.writeBackup ?? writeRuntimeBackup,
+    );
+
+    return toTransactionCommandResult(contractAddress, txData.public, backupPath);
+  } finally {
+    if (currentPrivateState !== undefined) {
+      clearPrivateState(currentPrivateState);
+    }
+
+    secrets.walletSeed.fill(0);
+    await runtime?.close();
+  }
+};
 
 export const runCommitScoreCommand = async (
   config: CliConfig,
@@ -373,45 +450,72 @@ export const runRevealScoreCommand = async (
 ): Promise<TransactionCommandResult> => {
   const contractAddress = parseContractAddress(contractAddressValue);
   const applicationId = parseBytes32('application ID', applicationIdHex);
-  const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
-  assertDoctorReady(checks);
-  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
-  let currentPrivateState: AequiraPrivateState | undefined;
-  let runtime: AequiraRuntime | undefined;
+  return runExistingPrivateStateCall(
+    config,
+    contractAddress,
+    'revealScore',
+    (contract) => contract.callTx.revealScore(applicationId),
+    dependencies,
+  );
+};
 
-  try {
-    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+export const runRegisterReviewerCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  reviewerIdHex: string,
+  dependencies: CommandDependencies = {},
+): Promise<TransactionCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const reviewerId = parseBytes32('reviewer ID', reviewerIdHex);
+
+  return runExistingPrivateStateCall(
+    config,
+    contractAddress,
+    'registerReviewer',
+    (contract) => contract.callTx.registerReviewer(reviewerId),
+    dependencies,
+  );
+};
+
+export type PhaseCommand = 'open-applications' | 'open-reveal' | 'open-review';
+
+export const runPhaseCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  command: PhaseCommand,
+  dependencies: CommandDependencies = {},
+): Promise<TransactionCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+
+  if (command === 'open-applications') {
+    return runExistingPrivateStateCall(
       config,
-      privateStatePassword: secrets.privateStatePassword,
-      walletSeed: secrets.walletSeed,
-    });
-    await runtime.wallet.start();
-    await runtime.wallet.waitForSync();
-
-    const contract = await joinForCall(
-      runtime,
       contractAddress,
-      dependencies.joinContract ?? joinAequira,
+      'openApplications',
+      (contract) => contract.callTx.openApplications(),
+      dependencies,
     );
-    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
-    const txData = await contract.callTx.revealScore(applicationId);
-    const backupPath = await writeFinalizedCallBackup(
-      config,
-      contractAddress,
-      'revealScore',
-      txData.public,
-      runtime,
-      dependencies.writeBackup ?? writeRuntimeBackup,
-    );
-
-    return toTransactionCommandResult(contractAddress, txData.public, backupPath);
-  } finally {
-    if (currentPrivateState !== undefined) {
-      clearPrivateState(currentPrivateState);
-    }
-
-    secrets.walletSeed.fill(0);
-    await runtime?.close();
   }
+
+  if (command === 'open-review') {
+    return runExistingPrivateStateCall(
+      config,
+      contractAddress,
+      'openReview',
+      (contract) => contract.callTx.openReview(),
+      dependencies,
+    );
+  }
+
+  if (command === 'open-reveal') {
+    return runExistingPrivateStateCall(
+      config,
+      contractAddress,
+      'openReveal',
+      (contract) => contract.callTx.openReveal(),
+      dependencies,
+    );
+  }
+
+  throw new Error('Unsupported phase command');
 };

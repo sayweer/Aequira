@@ -7,6 +7,10 @@ export const COMMANDS = [
   'doctor',
   'help',
   'join',
+  'open-applications',
+  'open-reveal',
+  'open-review',
+  'register-reviewer',
   'reveal-score',
 ] as const;
 
@@ -19,6 +23,7 @@ export type CliArguments = {
   readonly json: boolean;
   readonly network?: AequiraNetwork;
   readonly proofServer?: string;
+  readonly reviewerId?: string;
   readonly roundId?: string;
 };
 
@@ -64,6 +69,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   let contractAddress: string | undefined;
   let network: AequiraNetwork | undefined;
   let proofServer: string | undefined;
+  let reviewerId: string | undefined;
   let roundId: string | undefined;
 
   for (let index = 0; index < options.length; index += 1) {
@@ -115,11 +121,23 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--reviewer-id') {
+      reviewerId = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option "${option}"`);
   }
 
   const requiresContractAddress =
-    commandValue === 'commit-score' || commandValue === 'join' || commandValue === 'reveal-score';
+    commandValue === 'commit-score' ||
+    commandValue === 'join' ||
+    commandValue === 'open-applications' ||
+    commandValue === 'open-reveal' ||
+    commandValue === 'open-review' ||
+    commandValue === 'register-reviewer' ||
+    commandValue === 'reveal-score';
   const requiresApplicationId = commandValue === 'commit-score' || commandValue === 'reveal-score';
 
   if (commandValue === 'deploy' && roundId === undefined) {
@@ -135,7 +153,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   }
 
   if (!requiresContractAddress && contractAddress !== undefined) {
-    throw new Error('--contract-address is only valid with commit-score, join, or reveal-score');
+    throw new Error('--contract-address is only valid with a deployed-contract command');
   }
 
   if (requiresApplicationId && applicationId === undefined) {
@@ -146,6 +164,14 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--application-id is only valid with commit-score or reveal-score');
   }
 
+  if (commandValue === 'register-reviewer' && reviewerId === undefined) {
+    throw new Error('register-reviewer requires --reviewer-id');
+  }
+
+  if (commandValue !== 'register-reviewer' && reviewerId !== undefined) {
+    throw new Error('--reviewer-id is only valid with register-reviewer');
+  }
+
   return {
     command: commandValue as CliCommand,
     json,
@@ -153,6 +179,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     ...(contractAddress === undefined ? {} : { contractAddress }),
     ...(network === undefined ? {} : { network }),
     ...(proofServer === undefined ? {} : { proofServer }),
+    ...(reviewerId === undefined ? {} : { reviewerId }),
     ...(roundId === undefined ? {} : { roundId }),
   };
 };

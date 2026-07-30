@@ -1,6 +1,7 @@
 import {
   compiledAequiraContract,
   ledger,
+  pureCircuits,
   type AequiraPrivateState,
   type Ledger,
 } from '@aequira/contract';
@@ -30,6 +31,11 @@ export const validateAequiraPrivateState = (privateState: AequiraPrivateState): 
   if (privateState.score < 0n || privateState.score > 100n) {
     throw new RangeError('score must be between 0 and 100');
   }
+};
+
+export const deriveReviewerId = (reviewerSecret: Uint8Array): Uint8Array => {
+  assertBytes32('reviewerSecret', reviewerSecret);
+  return Uint8Array.from(pureCircuits.reviewerId(reviewerSecret));
 };
 
 export type DeployAequiraOptions = {

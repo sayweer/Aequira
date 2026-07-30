@@ -40,7 +40,7 @@ AEQUIRA has its first L1 contract slice:
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, non-overwriting runtime backups with restrictive filesystem
   permissions
-- 37 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+- 40 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
   storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
@@ -98,6 +98,15 @@ Join an existing deployment:
 pnpm --filter @aequira/cli start join --network preprod --contract-address CONTRACT_ADDRESS
 ```
 
+`join` returns the account's public reviewer pseudonym. During setup, the
+organizer can register that value and then advance the round:
+
+```bash
+pnpm --filter @aequira/cli start register-reviewer --network preprod --contract-address CONTRACT_ADDRESS --reviewer-id REVIEWER_ID_64_HEX
+pnpm --filter @aequira/cli start open-applications --network preprod --contract-address CONTRACT_ADDRESS
+pnpm --filter @aequira/cli start open-review --network preprod --contract-address CONTRACT_ADDRESS
+```
+
 Commit a score during the review phase:
 
 ```bash
@@ -107,6 +116,7 @@ pnpm --filter @aequira/cli start commit-score --network preprod --contract-addre
 Reveal the same score during the reveal phase:
 
 ```bash
+pnpm --filter @aequira/cli start open-reveal --network preprod --contract-address CONTRACT_ADDRESS
 pnpm --filter @aequira/cli start reveal-score --network preprod --contract-address CONTRACT_ADDRESS --application-id APPLICATION_ID_64_HEX
 ```
 
