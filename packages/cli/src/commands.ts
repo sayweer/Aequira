@@ -26,9 +26,11 @@ import { createAequiraRuntime, type AequiraRuntime } from './runtime.js';
 import {
   promptHiddenSecret,
   readRuntimeSecrets,
+  readWalletSeed,
   type RuntimeSecrets,
   type SecretPrompt,
 } from './secret-input.js';
+import { deriveUnshieldedAddress } from './wallet-provider.js';
 
 const BYTES32_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 const SCORE_PATTERN = /^(?:0|[1-9][0-9]{0,2})$/;
@@ -85,11 +87,13 @@ const createFreshPrivateState = (): AequiraPrivateState =>
 
 export type CommandDependencies = {
   readonly createRuntime?: typeof createAequiraRuntime;
+  readonly deriveWalletAddress?: typeof deriveUnshieldedAddress;
   readonly deployContract?: typeof deployAequira;
   readonly joinContract?: typeof joinAequira;
   readonly promptSecret?: SecretPrompt;
   readonly readBackup?: typeof readRuntimeBackup;
   readonly readSecrets?: (promptSecret?: SecretPrompt) => Promise<RuntimeSecrets>;
+  readonly readWalletSeed?: (promptSecret?: SecretPrompt) => Promise<Uint8Array>;
   readonly runPrerequisiteChecks?: typeof runDoctor;
   readonly verifyBackup?: typeof verifyRuntimeBackupAuthentication;
   readonly writeBackup?: typeof writeRuntimeBackup;
@@ -246,6 +250,33 @@ export type RestoreCommandResult = {
   readonly restoredPrivateStates: number;
   readonly restoredSigningKeys: number;
   readonly reviewerId: string;
+};
+
+export type WalletAddressCommandResult = {
+  readonly network: CliConfig['network'];
+  readonly unshieldedAddress: string;
+};
+
+export const runWalletAddressCommand = async (
+  config: CliConfig,
+  dependencies: CommandDependencies = {},
+): Promise<WalletAddressCommandResult> => {
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+
+  try {
+    const unshieldedAddress = (dependencies.deriveWalletAddress ?? deriveUnshieldedAddress)(
+      config,
+      walletSeed,
+    );
+
+    return {
+      network: config.network,
+      unshieldedAddress,
+    };
+  } finally {
+    walletSeed.fill(0);
+  }
 };
 
 export const runJoinCommand = async (

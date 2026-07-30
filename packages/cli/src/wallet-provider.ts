@@ -102,6 +102,32 @@ const deriveWalletKeys = (
   }
 };
 
+export const deriveUnshieldedAddress = (config: CliConfig, walletSeed: Uint8Array): string => {
+  let hdWallet: HDWallet | undefined;
+  let unshieldedKey: Uint8Array | undefined;
+
+  try {
+    if (walletSeed.byteLength !== WALLET_SEED_BYTES) {
+      throw new RangeError(`wallet seed must contain exactly ${WALLET_SEED_BYTES} bytes`);
+    }
+
+    const result = HDWallet.fromSeed(walletSeed);
+
+    if (result.type !== 'seedOk') {
+      throw new Error('Wallet seed could not be derived');
+    }
+
+    hdWallet = result.hdWallet;
+    unshieldedKey = deriveRoleKey(hdWallet.selectAccount(0), Roles.NightExternal);
+
+    return PublicKey.fromKeyStore(createKeystore(unshieldedKey, config.walletNetworkId)).address;
+  } finally {
+    walletSeed.fill(0);
+    unshieldedKey?.fill(0);
+    hdWallet?.clear();
+  }
+};
+
 export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
   readonly accountId: string;
   readonly wallet: WalletFacade;

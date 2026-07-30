@@ -13,6 +13,7 @@ export const COMMANDS = [
   'register-reviewer',
   'restore',
   'reveal-score',
+  'wallet-address',
 ] as const;
 
 export type CliCommand = (typeof COMMANDS)[number];

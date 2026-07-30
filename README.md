@@ -35,12 +35,12 @@ AEQUIRA has its first L1 contract slice:
 - score opening and per-application aggregation
 - a deployable `CompiledContract` bundle containing the required ZK assets
 - a typed SDK for deploy, join, private-state validation, and ledger queries
-- CLI configuration, diagnostics, deploy, join, sealed-score commit, and score
-  reveal commands for Preview and Preprod
+- CLI configuration, offline funding-address derivation, diagnostics, deploy,
+  join, sealed-score commit, and score reveal commands for Preview and Preprod
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, password-authenticated, non-overwriting runtime backups with
   restrictive filesystem permissions
-- 44 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+- 46 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
   storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
@@ -75,6 +75,16 @@ Compile only the Compact contract:
 ```bash
 pnpm compact:build
 ```
+
+Derive the public unshielded address to fund on Preprod:
+
+```bash
+pnpm --filter @aequira/cli start wallet-address --network preprod
+```
+
+The command reads the wallet seed through a masked prompt, prints only the public
+address, and does not start the wallet network client or require the local
+private-state password.
 
 Start the matrix-pinned proof server on the loopback interface:
 

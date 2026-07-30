@@ -57,10 +57,14 @@ export type RuntimeSecrets = {
   readonly walletSeed: Uint8Array;
 };
 
+export const readWalletSeed = async (
+  promptSecret: SecretPrompt = promptHiddenSecret,
+): Promise<Uint8Array> => parseWalletSeed(await promptSecret('Wallet seed (64 hex): '));
+
 export const readRuntimeSecrets = async (
   promptSecret: SecretPrompt = promptHiddenSecret,
 ): Promise<RuntimeSecrets> => {
-  const walletSeed = parseWalletSeed(await promptSecret('Wallet seed (64 hex): '));
+  const walletSeed = await readWalletSeed(promptSecret);
 
   try {
     const privateStatePassword = await promptSecret('Private-state storage password: ');

@@ -9,6 +9,7 @@ import {
   runRegisterReviewerCommand,
   runRestoreCommand,
   runRevealScoreCommand,
+  runWalletAddressCommand,
 } from './commands.js';
 import { loadCliConfig } from './config.js';
 import { runDoctor } from './doctor.js';
@@ -19,6 +20,7 @@ const HELP = `AEQUIRA CLI
 Usage:
   aequira config [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
+  aequira wallet-address [--network preview|preprod] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
@@ -58,6 +60,12 @@ const main = async (): Promise<void> => {
 
   if (args.command === 'config') {
     write(JSON.stringify(config, null, args.json ? 2 : 0));
+    return;
+  }
+
+  if (args.command === 'wallet-address') {
+    const result = await runWalletAddressCommand(config);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
     return;
   }
 
