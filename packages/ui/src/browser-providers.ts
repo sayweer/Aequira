@@ -22,6 +22,7 @@ import {
 import type { UnboundTransaction } from '@midnight-ntwrk/midnight-js-types';
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 
+import { withDeploymentStage } from './deployment-errors.js';
 import { normalizeLocalProofServerUrl } from './provider-security.js';
 import { AEQUIRA_NETWORK_ID } from './wallet.js';
 
@@ -62,19 +63,23 @@ export const createBrowserProviderSession = async (
   validatePassword(privateStatePassword);
   setNetworkId(AEQUIRA_NETWORK_ID);
 
-  await connectedApi.hintUsage([
-    'getConfiguration',
-    'getDustBalance',
-    'getShieldedAddresses',
-    'balanceUnsealedTransaction',
-    'submitTransaction',
-  ]);
+  await withDeploymentStage('wallet-permissions', () =>
+    connectedApi.hintUsage([
+      'getConfiguration',
+      'getDustBalance',
+      'getShieldedAddresses',
+      'balanceUnsealedTransaction',
+      'submitTransaction',
+    ]),
+  );
 
-  const [configuration, dust, shieldedAddresses] = await Promise.all([
-    connectedApi.getConfiguration(),
-    connectedApi.getDustBalance(),
-    connectedApi.getShieldedAddresses(),
-  ]);
+  const [configuration, dust, shieldedAddresses] = await withDeploymentStage('wallet-context', () =>
+    Promise.all([
+      connectedApi.getConfiguration(),
+      connectedApi.getDustBalance(),
+      connectedApi.getShieldedAddresses(),
+    ]),
+  );
 
   if (configuration.networkId !== AEQUIRA_NETWORK_ID) {
     throw new Error('Wallet provider configuration is outside Midnight Preprod');
@@ -84,64 +89,69 @@ export const createBrowserProviderSession = async (
   }
 
   const passwordHolder = { value: privateStatePassword };
-  const privateStateProvider = levelPrivateStateProvider<
-    AequiraPrivateStateId,
-    AequiraPrivateState
-  >({
-    accountId: shieldedAddresses.shieldedAddress,
-    midnightDbName: PRIVATE_STATE_DATABASE,
-    privateStateStoreName: PRIVATE_STATE_STORE,
-    signingKeyStoreName: SIGNING_KEY_STORE,
-    privateStoragePasswordProvider: () => passwordHolder.value,
-  }) as EncryptedBrowserPrivateStateProvider;
+  const privateStateProvider = await withDeploymentStage(
+    'private-state',
+    () =>
+      levelPrivateStateProvider<AequiraPrivateStateId, AequiraPrivateState>({
+        accountId: shieldedAddresses.shieldedAddress,
+        midnightDbName: PRIVATE_STATE_DATABASE,
+        privateStateStoreName: PRIVATE_STATE_STORE,
+        signingKeyStoreName: SIGNING_KEY_STORE,
+        privateStoragePasswordProvider: () => passwordHolder.value,
+      }) as EncryptedBrowserPrivateStateProvider,
+  );
   try {
-    const zkConfigProvider = new FetchZkConfigProvider<AequiraCircuitKey>(
-      window.location.origin,
-      fetch.bind(window),
-    );
-    const providers: AequiraProviders = {
-      privateStateProvider,
-      proofProvider: httpClientProofProvider(
-        resolveProofServerUrl(configuration.proverServerUri),
-        zkConfigProvider,
-      ),
-      publicDataProvider: indexerPublicDataProvider(
-        configuration.indexerUri,
-        configuration.indexerWsUri,
-        globalThis.WebSocket as unknown as NonNullable<
-          Parameters<typeof indexerPublicDataProvider>[2]
-        >,
-      ),
-      zkConfigProvider,
-      walletProvider: {
-        getCoinPublicKey: () => shieldedAddresses.shieldedCoinPublicKey,
-        getEncryptionPublicKey: () => shieldedAddresses.shieldedEncryptionPublicKey,
-        balanceTx: async (transaction: UnboundTransaction): Promise<FinalizedTransaction> => {
-          const balanced = await connectedApi.balanceUnsealedTransaction(
-            toHex(transaction.serialize()),
-          );
+    const providers = await withDeploymentStage('provider-configuration', () => {
+      const initializedZkConfigProvider = new FetchZkConfigProvider<AequiraCircuitKey>(
+        window.location.origin,
+        fetch.bind(window),
+      );
+      const initializedProviders: AequiraProviders = {
+        privateStateProvider,
+        proofProvider: httpClientProofProvider(
+          resolveProofServerUrl(configuration.proverServerUri),
+          initializedZkConfigProvider,
+        ),
+        publicDataProvider: indexerPublicDataProvider(
+          configuration.indexerUri,
+          configuration.indexerWsUri,
+          globalThis.WebSocket as unknown as NonNullable<
+            Parameters<typeof indexerPublicDataProvider>[2]
+          >,
+        ),
+        zkConfigProvider: initializedZkConfigProvider,
+        walletProvider: {
+          getCoinPublicKey: () => shieldedAddresses.shieldedCoinPublicKey,
+          getEncryptionPublicKey: () => shieldedAddresses.shieldedEncryptionPublicKey,
+          balanceTx: async (transaction: UnboundTransaction): Promise<FinalizedTransaction> => {
+            const balanced = await connectedApi.balanceUnsealedTransaction(
+              toHex(transaction.serialize()),
+            );
 
-          return Transaction.deserialize<SignatureEnabled, Proof, Binding>(
-            'signature',
-            'proof',
-            'binding',
-            fromHex(balanced.tx),
-          );
+            return Transaction.deserialize<SignatureEnabled, Proof, Binding>(
+              'signature',
+              'proof',
+              'binding',
+              fromHex(balanced.tx),
+            );
+          },
         },
-      },
-      midnightProvider: {
-        submitTx: async (transaction: FinalizedTransaction): Promise<TransactionId> => {
-          await connectedApi.submitTransaction(toHex(transaction.serialize()));
-          const transactionId = transaction.identifiers()[0];
+        midnightProvider: {
+          submitTx: async (transaction: FinalizedTransaction): Promise<TransactionId> => {
+            await connectedApi.submitTransaction(toHex(transaction.serialize()));
+            const transactionId = transaction.identifiers()[0];
 
-          if (transactionId === undefined) {
-            throw new Error('Submitted transaction did not expose an identifier');
-          }
+            if (transactionId === undefined) {
+              throw new Error('Submitted transaction did not expose an identifier');
+            }
 
-          return transactionId;
+            return transactionId;
+          },
         },
-      },
-    };
+      };
+
+      return initializedProviders;
+    });
     let closed = false;
 
     return {

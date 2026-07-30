@@ -2,6 +2,7 @@ import { createAequiraPrivateState, deployAequira, type FoundAequiraContract } f
 import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 
 import { createBrowserProviderSession, type BrowserProviderSession } from './browser-providers.js';
+import { withDeploymentStage } from './deployment-errors.js';
 
 const PRIVATE_VALUE_LENGTH = 32;
 
@@ -27,10 +28,12 @@ export const deployNewAequira = async (
       0n,
       randomPrivateValue(),
     );
-    const contract = await deployAequira(session.providers, {
-      privateState,
-      roundId: randomPrivateValue(),
-    });
+    const contract = await withDeploymentStage('contract-deployment', () =>
+      deployAequira(session.providers, {
+        privateState,
+        roundId: randomPrivateValue(),
+      }),
+    );
 
     return {
       address: contract.deployTxData.public.contractAddress,
