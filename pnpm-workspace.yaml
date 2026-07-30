@@ -2,4 +2,5 @@ packages:
   - packages/*
 allowBuilds:
   classic-level: true
+  esbuild: true
   msgpackr-extract: false

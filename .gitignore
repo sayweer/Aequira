@@ -49,6 +49,7 @@ AI_CONTEXT*.md
 CONTEXT*.md
 PROMPT*.md
 *.prompt.md
+brand.md
 .agents/
 .claude/
 .codex/
@@ -90,8 +91,10 @@ out/
 .next/
 .turbo/
 .cache/
+.vite/
 .parcel-cache/
 .eslintcache
+.test-build/
 *.tsbuildinfo
 
 # Midnight / Compact generated artifacts and private state

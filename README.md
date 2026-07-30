@@ -73,6 +73,19 @@ Run all currently available checks:
 pnpm verify
 ```
 
+Start the browser DApp:
+
+```bash
+pnpm --filter @aequira/ui dev
+```
+
+Open `http://127.0.0.1:3000` in Chrome with Lace installed and configured for
+Midnight Preprod. The current browser slice discovers every wallet injected
+under `window.midnight`, lets the user choose when multiple wallets are
+available, requests a Preprod connection, validates the returned unshielded
+address, and supports clearing the page session through Disconnect. No wallet
+secret or seed is read by the application.
+
 Compile only the Compact contract:
 
 ```bash
