@@ -11,6 +11,7 @@ export const COMMANDS = [
   'open-applications',
   'open-reveal',
   'open-review',
+  'register-dust',
   'register-reviewer',
   'restore',
   'reveal-score',

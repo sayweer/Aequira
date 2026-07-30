@@ -56,9 +56,10 @@ lifecycle, prerequisite gating, secret cleanup, reviewer/admin orchestration,
 sealed-score transaction handling, and a real encrypted backup/restore
 round-trip through the Level provider. They also verify offline Preview/Preprod
 funding-address derivation, network-specific address prefixes, synchronized
-public funding-state reporting, and failure-path wallet cleanup with explicit
-ledger key clearing. Backup format v2 authenticates its public network/address
-envelope with a password-derived HMAC.
+public funding-state reporting, idempotent NIGHT UTXO selection for Dust
+registration, and failure-path wallet cleanup with explicit ledger key clearing.
+Backup format v2 authenticates its public network/address envelope with a
+password-derived HMAC.
 
 `pnpm verify` and the production audit pass with no reported issues or known
 vulnerabilities. Native dependency scripts remain deny-by-default:

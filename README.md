@@ -36,8 +36,8 @@ AEQUIRA has its first L1 contract slice:
 - a deployable `CompiledContract` bundle containing the required ZK assets
 - a typed SDK for deploy, join, private-state validation, and ledger queries
 - CLI configuration, offline funding-address derivation, network-synced funding
-  status, diagnostics, deploy, join, sealed-score commit, and score reveal
-  commands for Preview and Preprod
+  status, idempotent NIGHT-to-Dust registration, diagnostics, deploy, join,
+  sealed-score commit, and score reveal commands for Preview and Preprod
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, password-authenticated, non-overwriting runtime backups with
   restrictive filesystem permissions
@@ -99,6 +99,17 @@ network, returns NIGHT and Dust balances as atomic-unit strings, and always clos
 the wallet while clearing its derived SDK key material. `hasDust` reports only
 whether the current Dust balance is positive; it does not guarantee that the
 balance covers a particular transaction.
+
+Register every currently available, unregistered NIGHT UTXO for Dust generation:
+
+```bash
+pnpm --filter @aequira/cli start register-dust --network preprod
+```
+
+The command submits at most one registration transaction. If there is no
+eligible NIGHT UTXO, it returns `submitted: false` without creating a
+transaction. Run `funding-status` again after the registration is processed to
+observe the current Dust balance.
 
 Start the matrix-pinned proof server on the loopback interface:
 

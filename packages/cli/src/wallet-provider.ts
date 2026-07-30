@@ -136,6 +136,12 @@ export type WalletFundingState = {
   readonly nightBalance: bigint;
 };
 
+export type DustRegistrationResult = {
+  readonly dustBalanceBefore: bigint;
+  readonly registeredUtxos: number;
+  readonly transactionId: string | null;
+};
+
 const clearDerivedWalletKeys = (keys: DerivedWalletKeys): void => {
   const errors: unknown[] = [];
 
@@ -297,6 +303,42 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
     return {
       dustBalance: state.dust.balance(new Date()),
       nightBalance: state.unshielded.balances[unshieldedToken().raw] ?? 0n,
+    };
+  }
+
+  async registerAvailableNightForDust(): Promise<DustRegistrationResult> {
+    if (!this.#started) {
+      throw new Error('Wallet must be started before registering NIGHT for Dust generation');
+    }
+
+    const state = await this.wallet.waitForSyncedState();
+    const nightToken = unshieldedToken().raw;
+    const unregisteredNightUtxos = state.unshielded.availableCoins.filter(
+      (coin) => coin.utxo.type === nightToken && !coin.meta.registeredForDustGeneration,
+    );
+    const dustBalanceBefore = state.dust.balance(new Date());
+
+    if (unregisteredNightUtxos.length === 0) {
+      return {
+        dustBalanceBefore,
+        registeredUtxos: 0,
+        transactionId: null,
+      };
+    }
+
+    const recipe = await this.wallet.registerNightUtxosForDustGeneration(
+      unregisteredNightUtxos,
+      this.getUnshieldedKeystore().getPublicKey(),
+      (payload) => this.getUnshieldedKeystore().signData(payload),
+      state.dust.address,
+    );
+    const transaction = await this.wallet.finalizeRecipe(recipe);
+    const transactionId = await this.wallet.submitTransaction(transaction);
+
+    return {
+      dustBalanceBefore,
+      registeredUtxos: unregisteredNightUtxos.length,
+      transactionId,
     };
   }
 

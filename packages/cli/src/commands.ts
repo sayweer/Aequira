@@ -154,6 +154,19 @@ export class FinalizedCallBackupError extends Error {
   }
 }
 
+export class DustRegistrationCleanupError extends Error {
+  override readonly name = 'DustRegistrationCleanupError';
+  readonly transactionId: string;
+
+  constructor(transactionId: string, cause: unknown) {
+    super(
+      `Dust registration transaction ${transactionId} was submitted, but wallet cleanup failed. Do not submit the registration again until funding-status confirms the network state.`,
+      { cause },
+    );
+    this.transactionId = transactionId;
+  }
+}
+
 const toTransactionCommandResult = (
   contractAddress: ContractAddress,
   transaction: FinalizedTxData,
@@ -266,6 +279,15 @@ export type FundingStatusCommandResult = {
   readonly unshieldedAddress: string;
 };
 
+export type RegisterDustCommandResult = {
+  readonly dustBalanceBefore: string;
+  readonly network: CliConfig['network'];
+  readonly registeredUtxos: number;
+  readonly submitted: boolean;
+  readonly transactionId: string | null;
+  readonly unshieldedAddress: string;
+};
+
 export const runWalletAddressCommand = async (
   config: CliConfig,
   dependencies: CommandDependencies = {},
@@ -314,6 +336,46 @@ export const runFundingStatusCommand = async (
   } finally {
     walletSeed.fill(0);
     await wallet?.stop();
+  }
+};
+
+export const runRegisterDustCommand = async (
+  config: CliConfig,
+  dependencies: CommandDependencies = {},
+): Promise<RegisterDustCommandResult> => {
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+  let wallet: AequiraWalletProvider | undefined;
+  let submittedTransactionId: string | undefined;
+
+  try {
+    wallet = await (dependencies.createWalletProvider ?? AequiraWalletProvider.create)(
+      config,
+      walletSeed,
+    );
+    await wallet.start();
+    const registration = await wallet.registerAvailableNightForDust();
+    submittedTransactionId = registration.transactionId ?? undefined;
+
+    return {
+      dustBalanceBefore: registration.dustBalanceBefore.toString(),
+      network: config.network,
+      registeredUtxos: registration.registeredUtxos,
+      submitted: registration.transactionId !== null,
+      transactionId: registration.transactionId,
+      unshieldedAddress: wallet.accountId,
+    };
+  } finally {
+    walletSeed.fill(0);
+
+    try {
+      await wallet?.stop();
+    } catch (error) {
+      if (submittedTransactionId !== undefined) {
+        throw new DustRegistrationCleanupError(submittedTransactionId, error);
+      }
+      throw error;
+    }
   }
 };
 

@@ -7,6 +7,7 @@ import {
   runFundingStatusCommand,
   runJoinCommand,
   runPhaseCommand,
+  runRegisterDustCommand,
   runRegisterReviewerCommand,
   runRestoreCommand,
   runRevealScoreCommand,
@@ -23,6 +24,7 @@ Usage:
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira wallet-address [--network preview|preprod] [--json]
   aequira funding-status [--network preview|preprod] [--json]
+  aequira register-dust [--network preview|preprod] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
@@ -73,6 +75,12 @@ const main = async (): Promise<void> => {
 
   if (args.command === 'funding-status') {
     const result = await runFundingStatusCommand(config);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+    return;
+  }
+
+  if (args.command === 'register-dust') {
+    const result = await runRegisterDustCommand(config);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
     return;
   }
