@@ -16,6 +16,7 @@ export const COMMANDS = [
   'restore',
   'reveal-score',
   'wallet-address',
+  'wallet-create',
 ] as const;
 
 export type CliCommand = (typeof COMMANDS)[number];

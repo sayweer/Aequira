@@ -13,7 +13,8 @@ import {
 } from '@aequira/sdk';
 import type { ContractAddress } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
-import { assertIsContractAddress } from '@midnight-ntwrk/midnight-js-utils';
+import { assertIsContractAddress, validatePassword } from '@midnight-ntwrk/midnight-js-utils';
+import { generateRandomSeed } from '@midnight-ntwrk/wallet-sdk';
 
 import {
   readRuntimeBackup,
@@ -31,6 +32,7 @@ import {
   type SecretPrompt,
 } from './secret-input.js';
 import { AequiraWalletProvider, deriveUnshieldedAddress } from './wallet-provider.js';
+import { writeWalletVault } from './wallet-vault.js';
 
 const BYTES32_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 const SCORE_PATTERN = /^(?:0|[1-9][0-9]{0,2})$/;
@@ -100,14 +102,19 @@ export type CommandDependencies = {
   readonly createRuntime?: typeof createAequiraRuntime;
   readonly deriveWalletAddress?: typeof deriveUnshieldedAddress;
   readonly deployContract?: typeof deployAequira;
+  readonly generateWalletSeed?: typeof generateRandomSeed;
   readonly joinContract?: typeof joinAequira;
   readonly promptSecret?: SecretPrompt;
   readonly readBackup?: typeof readRuntimeBackup;
-  readonly readSecrets?: (promptSecret?: SecretPrompt) => Promise<RuntimeSecrets>;
-  readonly readWalletSeed?: (promptSecret?: SecretPrompt) => Promise<Uint8Array>;
+  readonly readSecrets?: (
+    config: CliConfig,
+    promptSecret?: SecretPrompt,
+  ) => Promise<RuntimeSecrets>;
+  readonly readWalletSeed?: (config: CliConfig, promptSecret?: SecretPrompt) => Promise<Uint8Array>;
   readonly runPrerequisiteChecks?: typeof runDoctor;
   readonly verifyBackup?: typeof verifyRuntimeBackupAuthentication;
   readonly writeBackup?: typeof writeRuntimeBackup;
+  readonly writeWalletVault?: typeof writeWalletVault;
 };
 
 export type TransactionCommandResult = {
@@ -219,7 +226,7 @@ export const runDeployCommand = async (
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let privateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
 
@@ -281,6 +288,10 @@ export type WalletAddressCommandResult = {
   readonly unshieldedAddress: string;
 };
 
+export type WalletCreateCommandResult = WalletAddressCommandResult & {
+  readonly vaultPath: string;
+};
+
 export type FundingStatusCommandResult = {
   readonly dustBalance: string;
   readonly hasDust: boolean;
@@ -298,12 +309,56 @@ export type RegisterDustCommandResult = {
   readonly unshieldedAddress: string;
 };
 
+export const runWalletCreateCommand = async (
+  config: CliConfig,
+  dependencies: CommandDependencies = {},
+): Promise<WalletCreateCommandResult> => {
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const password = await promptSecret('New development-wallet password: ');
+  validatePassword(password);
+  const confirmation = await promptSecret('Confirm development-wallet password: ');
+
+  if (confirmation !== password) {
+    throw new Error('Development-wallet passwords do not match');
+  }
+
+  const walletSeed = (dependencies.generateWalletSeed ?? generateRandomSeed)();
+
+  if (walletSeed.byteLength !== 32) {
+    walletSeed.fill(0);
+    throw new Error('Wallet SDK generated an invalid seed');
+  }
+
+  const addressSeed = Uint8Array.from(walletSeed);
+
+  try {
+    const unshieldedAddress = (dependencies.deriveWalletAddress ?? deriveUnshieldedAddress)(
+      config,
+      addressSeed,
+    );
+    const vaultPath = await (dependencies.writeWalletVault ?? writeWalletVault)({
+      config,
+      password,
+      seed: walletSeed,
+    });
+
+    return {
+      network: config.network,
+      unshieldedAddress,
+      vaultPath,
+    };
+  } finally {
+    addressSeed.fill(0);
+    walletSeed.fill(0);
+  }
+};
+
 export const runWalletAddressCommand = async (
   config: CliConfig,
   dependencies: CommandDependencies = {},
 ): Promise<WalletAddressCommandResult> => {
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(config, promptSecret);
 
   try {
     const unshieldedAddress = (dependencies.deriveWalletAddress ?? deriveUnshieldedAddress)(
@@ -325,7 +380,7 @@ export const runFundingStatusCommand = async (
   dependencies: CommandDependencies = {},
 ): Promise<FundingStatusCommandResult> => {
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(config, promptSecret);
   let wallet: AequiraWalletProvider | undefined;
 
   try {
@@ -354,7 +409,7 @@ export const runRegisterDustCommand = async (
   dependencies: CommandDependencies = {},
 ): Promise<RegisterDustCommandResult> => {
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(promptSecret);
+  const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(config, promptSecret);
   let wallet: AequiraWalletProvider | undefined;
   let submittedTransactionId: string | undefined;
 
@@ -398,7 +453,7 @@ export const runJoinCommand = async (
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let existingPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
   let initialPrivateState: AequiraPrivateState | undefined;
@@ -470,7 +525,7 @@ export const runRestoreCommand = async (
   }
 
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let restoredPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
 
@@ -574,7 +629,7 @@ const runExistingPrivateStateCall = async (
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let currentPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
 
@@ -626,7 +681,7 @@ export const runCommitScoreCommand = async (
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
-  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let currentPrivateState: AequiraPrivateState | undefined;
   let nextPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;

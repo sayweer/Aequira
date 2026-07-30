@@ -38,10 +38,12 @@ AEQUIRA has its first L1 contract slice:
 - CLI configuration, offline funding-address derivation, network-synced funding
   status, idempotent NIGHT-to-Dust registration, diagnostics, deploy, join,
   sealed-score commit, and score reveal commands for Preview and Preprod
+- a project-only development wallet whose Wallet SDK seed is encrypted at rest,
+  network-scoped, non-overwriting, and excluded from Git
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
 - encrypted, password-authenticated, non-overwriting runtime backups with
   restrictive filesystem permissions
-- 48 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+- 50 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
   storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
@@ -77,28 +79,45 @@ Compile only the Compact contract:
 pnpm compact:build
 ```
 
-Derive the public unshielded address to fund on Preprod:
+Create the project-only Preprod development wallet:
+
+```bash
+pnpm --filter @aequira/cli start wallet-create --network preprod
+```
+
+The command generates a fresh 32-byte Wallet SDK seed, encrypts it in the ignored
+`.private-state/` directory, sets owner-only file permissions, and prints only
+the public unshielded address and vault path. It refuses to overwrite an existing
+vault. Back up the encrypted vault file outside the repository and preserve its
+password separately.
+
+This programmatic wallet flow does not require a browser extension and follows
+Midnight's official
+[Preprod DUST guide](https://docs.midnight.network/guides/generating-dust-programmatically).
+
+Re-derive the public unshielded address to fund on Preprod:
 
 ```bash
 pnpm --filter @aequira/cli start wallet-address --network preprod
 ```
 
-The command reads the wallet seed through a masked prompt, prints only the public
-address, and does not start the wallet network client or require the local
-private-state password.
+The command unlocks the encrypted wallet through a masked password prompt, prints
+only the public address, and does not start the wallet network client or require
+the local private-state password.
 
-After using the selected network's faucet, synchronize the wallet and inspect its
-public funding state:
+Submit that public address to the official
+[Preprod faucet](https://midnight-tmnight-preprod.nethermind.dev/). After the
+tNIGHT arrives, synchronize the wallet and inspect its public funding state:
 
 ```bash
 pnpm --filter @aequira/cli start funding-status --network preprod
 ```
 
-This command also uses only the masked wallet seed. It connects to the selected
-network, returns NIGHT and Dust balances as atomic-unit strings, and always closes
-the wallet while clearing its derived SDK key material. `hasDust` reports only
-whether the current Dust balance is positive; it does not guarantee that the
-balance covers a particular transaction.
+This command also uses only the masked development-wallet password. It connects
+to the selected network, returns NIGHT and Dust balances as atomic-unit strings,
+and always closes the wallet while clearing its seed and derived SDK key
+material. `hasDust` reports only whether the current Dust balance is positive; it
+does not guarantee that the balance covers a particular transaction.
 
 Register every currently available, unregistered NIGHT UTXO for Dust generation:
 
@@ -174,15 +193,16 @@ pnpm --filter @aequira/cli start open-reveal --network preprod --contract-addres
 pnpm --filter @aequira/cli start reveal-score --network preprod --contract-address CONTRACT_ADDRESS --application-id APPLICATION_ID_64_HEX
 ```
 
-Commands that access private state prompt for the wallet seed and private-state
-password through an interactive, masked terminal input. `commit-score` also
-prompts for the private score and generates its salt internally; neither value
-is accepted through process arguments. Successful state-changing commands create
-an encrypted backup under the ignored private-state directory. The backup does
-not contain the wallet seed; preserve the seed and storage password separately.
+Commands that access private state prompt for the development-wallet password
+and private-state password through interactive, masked terminal input.
+`commit-score` also prompts for the private score and generates its salt
+internally; neither value is accepted through process arguments. Successful
+state-changing commands create an encrypted backup under the ignored
+private-state directory. Runtime backups do not contain the wallet vault;
+preserve the encrypted vault and both passwords separately.
 
-Restore a copied backup into an empty local state store using the same wallet
-seed and storage password:
+Restore a copied backup into an empty local state store using the same encrypted
+wallet vault and storage password:
 
 ```bash
 pnpm --filter @aequira/cli start restore --network preprod --backup-file BACKUP_PATH

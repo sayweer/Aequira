@@ -12,6 +12,7 @@ import {
   runRestoreCommand,
   runRevealScoreCommand,
   runWalletAddressCommand,
+  runWalletCreateCommand,
 } from './commands.js';
 import { loadCliConfig } from './config.js';
 import { runDoctor } from './doctor.js';
@@ -22,6 +23,7 @@ const HELP = `AEQUIRA CLI
 Usage:
   aequira config [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
+  aequira wallet-create [--network preview|preprod] [--json]
   aequira wallet-address [--network preview|preprod] [--json]
   aequira funding-status [--network preview|preprod] [--json]
   aequira register-dust [--network preview|preprod] [--json]
@@ -36,7 +38,8 @@ Usage:
   aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
-Commands that access private state require an interactive TTY for masked secret entry.
+wallet-create stores a new Wallet SDK seed in an encrypted, local-only vault.
+Wallet and private-state commands require an interactive TTY for masked secret entry.
 `;
 
 const write = (value: string): void => {
@@ -45,7 +48,7 @@ const write = (value: string): void => {
 
 const writeBackupReminder = (): void => {
   write(
-    'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
+    'Backup created. It does not contain the wallet vault; preserve the encrypted vault and both passwords separately.',
   );
 };
 
@@ -64,6 +67,18 @@ const main = async (): Promise<void> => {
 
   if (args.command === 'config') {
     write(JSON.stringify(config, null, args.json ? 2 : 0));
+    return;
+  }
+
+  if (args.command === 'wallet-create') {
+    const result = await runWalletCreateCommand(config);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      write(
+        'Encrypted development wallet created. Back up the vault file and keep its password outside the repository.',
+      );
+    }
     return;
   }
 
@@ -95,7 +110,7 @@ const main = async (): Promise<void> => {
 
     if (!args.json) {
       write(
-        'Restore completed without overwriting existing state. Preserve the wallet seed and storage password separately.',
+        'Restore completed without overwriting existing state. Preserve the encrypted wallet vault and both passwords separately.',
       );
     }
     return;

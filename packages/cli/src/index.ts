@@ -7,3 +7,4 @@ export * from './errors.js';
 export * from './runtime.js';
 export * from './secret-input.js';
 export * from './wallet-provider.js';
+export * from './wallet-vault.js';

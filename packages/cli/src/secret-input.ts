@@ -4,6 +4,9 @@ import { Writable } from 'node:stream';
 
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 
+import type { CliConfig } from './config.js';
+import { readWalletVault } from './wallet-vault.js';
+
 export type SecretPrompt = (label: string) => Promise<string>;
 
 export type SecretPromptStreams = {
@@ -58,13 +61,18 @@ export type RuntimeSecrets = {
 };
 
 export const readWalletSeed = async (
+  config: CliConfig,
   promptSecret: SecretPrompt = promptHiddenSecret,
-): Promise<Uint8Array> => parseWalletSeed(await promptSecret('Wallet seed (64 hex): '));
+): Promise<Uint8Array> => {
+  const password = await promptSecret('Development-wallet password: ');
+  return readWalletVault(config, password);
+};
 
 export const readRuntimeSecrets = async (
+  config: CliConfig,
   promptSecret: SecretPrompt = promptHiddenSecret,
 ): Promise<RuntimeSecrets> => {
-  const walletSeed = await readWalletSeed(promptSecret);
+  const walletSeed = await readWalletSeed(config, promptSecret);
 
   try {
     const privateStatePassword = await promptSecret('Private-state storage password: ');
