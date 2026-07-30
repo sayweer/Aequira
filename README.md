@@ -48,16 +48,15 @@ The L1 reviewer allowlist is intentionally temporary: membership access reveals
 which pseudonymous reviewer acts. L2 will replace it with private Merkle
 membership before the contract can claim reviewer unlinkability.
 
-No contract is deployed yet. Docker-backed proof-server verification remains
-pending.
+No contract is deployed yet. The matrix-pinned proof server is verified locally;
+the next L1 step is wallet funding and the first Preprod deployment.
 
 ## Requirements
 
 - Node.js `24.11.1` or newer (`.nvmrc` pins the verified official-example baseline)
 - pnpm `11.9.0`
 - Compact devtools `0.5.1`
-- Docker Desktop (required for the local proof server; not yet available on the
-  current development machine)
+- Docker Desktop `4.84.0` or another compatible Docker runtime
 
 Install the JavaScript workspace:
 
