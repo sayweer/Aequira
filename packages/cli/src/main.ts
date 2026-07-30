@@ -7,6 +7,7 @@ import {
   runJoinCommand,
   runPhaseCommand,
   runRegisterReviewerCommand,
+  runRestoreCommand,
   runRevealScoreCommand,
 } from './commands.js';
 import { loadCliConfig } from './config.js';
@@ -20,6 +21,7 @@ Usage:
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira restore --backup-file PATH [--network preview|preprod] [--json]
   aequira register-reviewer --contract-address ADDRESS --reviewer-id 64_HEX [--network preview|preprod] [--json]
   aequira open-applications --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira open-review --contract-address ADDRESS [--network preview|preprod] [--json]
@@ -28,7 +30,7 @@ Usage:
   aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
-State-changing commands require an interactive TTY for masked secret entry.
+Commands that access private state require an interactive TTY for masked secret entry.
 `;
 
 const write = (value: string): void => {
@@ -56,6 +58,22 @@ const main = async (): Promise<void> => {
 
   if (args.command === 'config') {
     write(JSON.stringify(config, null, args.json ? 2 : 0));
+    return;
+  }
+
+  if (args.command === 'restore') {
+    if (args.backupFile === undefined) {
+      throw new Error('restore requires --backup-file');
+    }
+
+    const result = await runRestoreCommand(config, args.backupFile);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      write(
+        'Restore completed without overwriting existing state. Preserve the wallet seed and storage password separately.',
+      );
+    }
     return;
   }
 

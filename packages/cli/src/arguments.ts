@@ -11,6 +11,7 @@ export const COMMANDS = [
   'open-reveal',
   'open-review',
   'register-reviewer',
+  'restore',
   'reveal-score',
 ] as const;
 
@@ -18,6 +19,7 @@ export type CliCommand = (typeof COMMANDS)[number];
 
 export type CliArguments = {
   readonly applicationId?: string;
+  readonly backupFile?: string;
   readonly command: CliCommand;
   readonly contractAddress?: string;
   readonly json: boolean;
@@ -66,6 +68,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
 
   let json = false;
   let applicationId: string | undefined;
+  let backupFile: string | undefined;
   let contractAddress: string | undefined;
   let network: AequiraNetwork | undefined;
   let proofServer: string | undefined;
@@ -127,6 +130,12 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--backup-file') {
+      backupFile = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option "${option}"`);
   }
 
@@ -172,10 +181,19 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--reviewer-id is only valid with register-reviewer');
   }
 
+  if (commandValue === 'restore' && backupFile === undefined) {
+    throw new Error('restore requires --backup-file');
+  }
+
+  if (commandValue !== 'restore' && backupFile !== undefined) {
+    throw new Error('--backup-file is only valid with restore');
+  }
+
   return {
     command: commandValue as CliCommand,
     json,
     ...(applicationId === undefined ? {} : { applicationId }),
+    ...(backupFile === undefined ? {} : { backupFile }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
     ...(network === undefined ? {} : { network }),
     ...(proofServer === undefined ? {} : { proofServer }),

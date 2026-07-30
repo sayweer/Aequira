@@ -15,7 +15,11 @@ import type { ContractAddress } from '@midnight-ntwrk/midnight-js-protocol/compa
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 import { assertIsContractAddress } from '@midnight-ntwrk/midnight-js-utils';
 
-import { writeRuntimeBackup } from './backup.js';
+import {
+  readRuntimeBackup,
+  verifyRuntimeBackupAuthentication,
+  writeRuntimeBackup,
+} from './backup.js';
 import type { CliConfig } from './config.js';
 import { runDoctor, type DoctorCheck } from './doctor.js';
 import { createAequiraRuntime, type AequiraRuntime } from './runtime.js';
@@ -84,8 +88,10 @@ export type CommandDependencies = {
   readonly deployContract?: typeof deployAequira;
   readonly joinContract?: typeof joinAequira;
   readonly promptSecret?: SecretPrompt;
+  readonly readBackup?: typeof readRuntimeBackup;
   readonly readSecrets?: (promptSecret?: SecretPrompt) => Promise<RuntimeSecrets>;
   readonly runPrerequisiteChecks?: typeof runDoctor;
+  readonly verifyBackup?: typeof verifyRuntimeBackupAuthentication;
   readonly writeBackup?: typeof writeRuntimeBackup;
 };
 
@@ -156,6 +162,7 @@ const toTransactionCommandResult = (
 });
 
 const writeFinalizedCallBackup = async (
+  authenticationPassword: string,
   config: CliConfig,
   contractAddress: ContractAddress,
   circuit: AequiraCallName,
@@ -165,6 +172,7 @@ const writeFinalizedCallBackup = async (
 ): Promise<string> => {
   try {
     return await writeBackup({
+      authenticationPassword,
       config,
       contractAddress,
       privateStateProvider: runtime.providers.privateStateProvider,
@@ -206,6 +214,7 @@ export const runDeployCommand = async (
 
     try {
       backupPath = await (dependencies.writeBackup ?? writeRuntimeBackup)({
+        authenticationPassword: secrets.privateStatePassword,
         config,
         contractAddress,
         privateStateProvider: runtime.providers.privateStateProvider,
@@ -229,6 +238,13 @@ export type JoinCommandResult = {
   readonly backupPath: string;
   readonly contractAddress: ContractAddress;
   readonly initializedPrivateState: boolean;
+  readonly reviewerId: string;
+};
+
+export type RestoreCommandResult = {
+  readonly contractAddress: ContractAddress;
+  readonly restoredPrivateStates: number;
+  readonly restoredSigningKeys: number;
   readonly reviewerId: string;
 };
 
@@ -274,6 +290,7 @@ export const runJoinCommand = async (
         : { contractAddress, initialPrivateState },
     );
     const backupPath = await (dependencies.writeBackup ?? writeRuntimeBackup)({
+      authenticationPassword: secrets.privateStatePassword,
       config,
       contractAddress,
       privateStateProvider: runtime.providers.privateStateProvider,
@@ -291,6 +308,84 @@ export const runJoinCommand = async (
     }
     if (initialPrivateState !== undefined) {
       clearPrivateState(initialPrivateState);
+    }
+
+    secrets.walletSeed.fill(0);
+    await runtime?.close();
+  }
+};
+
+export const runRestoreCommand = async (
+  config: CliConfig,
+  backupPath: string,
+  dependencies: CommandDependencies = {},
+): Promise<RestoreCommandResult> => {
+  const backup = await (dependencies.readBackup ?? readRuntimeBackup)(backupPath);
+
+  if (backup.network !== config.network) {
+    throw new Error(
+      `Backup network ${backup.network} does not match configured network ${config.network}`,
+    );
+  }
+
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(promptSecret);
+  let restoredPrivateState: AequiraPrivateState | undefined;
+  let runtime: AequiraRuntime | undefined;
+
+  try {
+    await (dependencies.verifyBackup ?? verifyRuntimeBackupAuthentication)(
+      backup,
+      secrets.privateStatePassword,
+    );
+    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+      config,
+      privateStatePassword: secrets.privateStatePassword,
+      walletSeed: secrets.walletSeed,
+    });
+    const provider = runtime.providers.privateStateProvider;
+    provider.setContractAddress(backup.contractAddress);
+    const existingPrivateState = await provider.get(AEQUIRA_PRIVATE_STATE_ID);
+    const existingSigningKey = await provider.getSigningKey(backup.contractAddress);
+
+    if (existingPrivateState !== null || existingSigningKey !== null) {
+      if (existingPrivateState !== null) {
+        clearPrivateState(existingPrivateState);
+      }
+      throw new Error(
+        'Restore target already contains contract state or a signing key; refusing to overwrite',
+      );
+    }
+
+    const signingKeyResult = await provider.importSigningKeys(backup.signingKeys, {
+      conflictStrategy: 'error',
+      maxKeys: 100,
+    });
+    const privateStateResult = await provider.importPrivateStates(backup.privateStates, {
+      conflictStrategy: 'error',
+      maxStates: 100,
+    });
+    const importedPrivateState = await provider.get(AEQUIRA_PRIVATE_STATE_ID);
+    const restoredSigningKey = await provider.getSigningKey(backup.contractAddress);
+
+    if (importedPrivateState === null || restoredSigningKey === null) {
+      throw new Error('Backup did not restore the required AEQUIRA state and signing key');
+    }
+
+    restoredPrivateState = importedPrivateState;
+    validateAequiraPrivateState(importedPrivateState);
+
+    return {
+      contractAddress: backup.contractAddress,
+      restoredPrivateStates: privateStateResult.imported,
+      restoredSigningKeys: signingKeyResult.imported,
+      reviewerId: Buffer.from(deriveReviewerId(importedPrivateState.reviewerSecret)).toString(
+        'hex',
+      ),
+    };
+  } finally {
+    if (restoredPrivateState !== undefined) {
+      clearPrivateState(restoredPrivateState);
     }
 
     secrets.walletSeed.fill(0);
@@ -359,6 +454,7 @@ const runExistingPrivateStateCall = async (
     currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const txData = await submitCall(contract);
     const backupPath = await writeFinalizedCallBackup(
+      secrets.privateStatePassword,
       config,
       contractAddress,
       circuit,
@@ -420,6 +516,7 @@ export const runCommitScoreCommand = async (
 
     const txData = await contract.callTx.commitScore(applicationId);
     const backupPath = await writeFinalizedCallBackup(
+      secrets.privateStatePassword,
       config,
       contractAddress,
       'commitScore',

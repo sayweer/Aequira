@@ -38,9 +38,9 @@ AEQUIRA has its first L1 contract slice:
 - CLI configuration, diagnostics, deploy, join, sealed-score commit, and score
   reveal commands for Preview and Preprod
 - a Wallet SDK runtime with account-scoped encrypted private-state storage
-- encrypted, non-overwriting runtime backups with restrictive filesystem
-  permissions
-- 40 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
+- encrypted, password-authenticated, non-overwriting runtime backups with
+  restrictive filesystem permissions
+- 44 local tests covering the contract, SDK inputs, wallet lifecycle, encrypted
   storage, backup safety, and deployment/sealed-score orchestration
 
 The L1 reviewer allowlist is intentionally temporary: membership access reveals
@@ -132,12 +132,23 @@ pnpm --filter @aequira/cli start open-reveal --network preprod --contract-addres
 pnpm --filter @aequira/cli start reveal-score --network preprod --contract-address CONTRACT_ADDRESS --application-id APPLICATION_ID_64_HEX
 ```
 
-State-changing commands prompt for the wallet seed and private-state password
-through an interactive, masked terminal input. `commit-score` also prompts for
-the private score and generates its salt internally; neither value is accepted
-through process arguments. Successful commands create an encrypted backup under
-the ignored private-state directory. The backup does not contain the wallet
-seed; preserve the seed and storage password separately.
+Commands that access private state prompt for the wallet seed and private-state
+password through an interactive, masked terminal input. `commit-score` also
+prompts for the private score and generates its salt internally; neither value
+is accepted through process arguments. Successful state-changing commands create
+an encrypted backup under the ignored private-state directory. The backup does
+not contain the wallet seed; preserve the seed and storage password separately.
+
+Restore a copied backup into an empty local state store using the same wallet
+seed and storage password:
+
+```bash
+pnpm --filter @aequira/cli start restore --network preprod --backup-file BACKUP_PATH
+```
+
+Restore validates the password-authenticated format, network, contract address,
+file size, and owner-only permissions before opening private storage. It refuses
+to overwrite existing contract state or signing keys.
 
 The CLI intentionally rejects wallet seeds, private keys, passwords, and
 contract secrets passed as command-line arguments.
