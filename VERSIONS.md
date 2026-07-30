@@ -34,7 +34,7 @@
 | Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
 | Preprod node                          | 1.0.0         | Official compatibility matrix; remote service          |
 | Midnight Indexer                      | 4.3.3         | Official compatibility matrix; remote service          |
-| Proof server image                    | 8.1.0         | Official compatibility matrix; Docker pending          |
+| Proof server image                    | 8.1.0         | Compose definition pinned; Docker execution pending    |
 | Lace                                  | Pending       | Verify during the L2 wallet milestone                  |
 
 ## Verification record

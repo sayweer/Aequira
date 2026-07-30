@@ -54,7 +54,9 @@ pending.
 
 - Node.js `24.11.1` or newer (`.nvmrc` pins the verified official-example baseline)
 - pnpm `11.9.0`
-- Compact toolchain and Docker (installation verification is still pending)
+- Compact devtools `0.5.1`
+- Docker Desktop (required for the local proof server; not yet available on the
+  current development machine)
 
 Install the JavaScript workspace:
 
@@ -73,6 +75,16 @@ Compile only the Compact contract:
 ```bash
 pnpm compact:build
 ```
+
+Start the matrix-pinned proof server on the loopback interface:
+
+```bash
+pnpm proof-server:up
+```
+
+The proof server processes private proving inputs, so the tracked Compose file
+publishes port `6300` only on `127.0.0.1`. Stop it with
+`pnpm proof-server:down`.
 
 Inspect the public Preprod configuration:
 

@@ -16,6 +16,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "pnpm -r --if-present run lint",
+    "proof-server:down": "docker compose -f compose.proof-server.yml down",
+    "proof-server:logs": "docker compose -f compose.proof-server.yml logs --follow proof-server",
+    "proof-server:up": "docker compose -f compose.proof-server.yml up --detach",
     "test": "pnpm -r --if-present run test",
     "typecheck": "pnpm -r --if-present run typecheck",
     "verify": "pnpm format:check && pnpm compact:check && pnpm lint && pnpm build && pnpm typecheck && pnpm test"
