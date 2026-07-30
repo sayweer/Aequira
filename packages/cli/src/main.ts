@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 
 import { parseCliArguments } from './arguments.js';
+import { runDeployCommand, runJoinCommand } from './commands.js';
 import { loadCliConfig } from './config.js';
 import { runDoctor } from './doctor.js';
+import { redactErrorMessage } from './errors.js';
 
 const HELP = `AEQUIRA CLI
 
 Usage:
   aequira config [--network preview|preprod] [--proof-server-url URL] [--json]
   aequira doctor [--network preview|preprod] [--proof-server-url URL] [--json]
+  aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
+  aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
+Deploy and join require an interactive TTY for masked secret entry.
 `;
 
 const write = (value: string): void => {
@@ -35,6 +40,38 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  if (args.command === 'deploy') {
+    if (args.roundId === undefined) {
+      throw new Error('deploy requires --round-id');
+    }
+
+    const result = await runDeployCommand(config, args.roundId);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      write(
+        'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
+      );
+    }
+    return;
+  }
+
+  if (args.command === 'join') {
+    if (args.contractAddress === undefined) {
+      throw new Error('join requires --contract-address');
+    }
+
+    const result = await runJoinCommand(config, args.contractAddress);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      write(
+        'Backup created. It does not contain the wallet seed; preserve the seed and storage password separately.',
+      );
+    }
+    return;
+  }
+
   const checks = await runDoctor(config);
 
   if (args.json) {
@@ -51,7 +88,7 @@ const main = async (): Promise<void> => {
 };
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : 'Unknown CLI error';
+  const message = redactErrorMessage(error);
   process.stderr.write(`AEQUIRA CLI error: ${message}\n`);
   process.exitCode = 1;
 });

@@ -1,14 +1,16 @@
 import type { AequiraNetwork } from './config.js';
 
-export const COMMANDS = ['config', 'doctor', 'help'] as const;
+export const COMMANDS = ['config', 'deploy', 'doctor', 'help', 'join'] as const;
 
 export type CliCommand = (typeof COMMANDS)[number];
 
 export type CliArguments = {
   readonly command: CliCommand;
+  readonly contractAddress?: string;
   readonly json: boolean;
   readonly network?: AequiraNetwork;
   readonly proofServer?: string;
+  readonly roundId?: string;
 };
 
 const SENSITIVE_OPTIONS = new Set([
@@ -48,8 +50,10 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   }
 
   let json = false;
+  let contractAddress: string | undefined;
   let network: AequiraNetwork | undefined;
   let proofServer: string | undefined;
+  let roundId: string | undefined;
 
   for (let index = 0; index < options.length; index += 1) {
     const option = options[index];
@@ -82,13 +86,43 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--round-id') {
+      roundId = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
+    if (option === '--contract-address') {
+      contractAddress = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option "${option}"`);
+  }
+
+  if (commandValue === 'deploy' && roundId === undefined) {
+    throw new Error('deploy requires --round-id');
+  }
+
+  if (commandValue !== 'deploy' && roundId !== undefined) {
+    throw new Error('--round-id is only valid with deploy');
+  }
+
+  if (commandValue === 'join' && contractAddress === undefined) {
+    throw new Error('join requires --contract-address');
+  }
+
+  if (commandValue !== 'join' && contractAddress !== undefined) {
+    throw new Error('--contract-address is only valid with join');
   }
 
   return {
     command: commandValue as CliCommand,
     json,
+    ...(contractAddress === undefined ? {} : { contractAddress }),
     ...(network === undefined ? {} : { network }),
     ...(proofServer === undefined ? {} : { proofServer }),
+    ...(roundId === undefined ? {} : { roundId }),
   };
 };

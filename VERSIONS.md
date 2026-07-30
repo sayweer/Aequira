@@ -49,9 +49,10 @@ does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
 The AEQUIRA L1 contract compiled 6 state-changing circuits. The repository now
-passes 22 local `node:test` tests: 10 contract, 3 SDK, and 9 CLI/runtime tests.
+passes 33 local `node:test` tests: 10 contract, 3 SDK, and 20 CLI/runtime tests.
 The CLI tests include encrypted-at-rest private-state checks, wrong-password
-failure, storage permission checks, seed consumption, and wallet lifecycle.
+failure, storage and backup permission checks, seed consumption, wallet
+lifecycle, prerequisite gating, secret cleanup, and deploy/join orchestration.
 
 `pnpm verify` and the production audit pass with no reported issues or known
 vulnerabilities. Native dependency scripts remain deny-by-default:
