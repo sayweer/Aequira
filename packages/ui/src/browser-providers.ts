@@ -27,6 +27,7 @@ import { normalizeLocalProofServerUrl } from './provider-security.js';
 import { AEQUIRA_NETWORK_ID } from './wallet.js';
 
 const DEFAULT_PROOF_SERVER_URL = 'http://127.0.0.1:6300';
+const DEVELOPMENT_PROOF_SERVER_PATH = '/__aequira_local';
 const PRIVATE_STATE_DATABASE = 'aequira-browser-state';
 const PRIVATE_STATE_STORE = 'aequira-private-state';
 const SIGNING_KEY_STORE = 'aequira-signing-keys';
@@ -48,6 +49,11 @@ export type BrowserProviderSession = {
 };
 
 const resolveProofServerUrl = (walletProofServerUrl: string | undefined): string => {
+  if (import.meta.env.DEV) {
+    // Keep witness-bearing proof requests same-origin in development; Vite forwards only to loopback.
+    return `${window.location.origin}${DEVELOPMENT_PROOF_SERVER_PATH}`;
+  }
+
   const configuredUrl = import.meta.env.VITE_PROOF_SERVER_URL?.trim();
 
   // ZK preimages may contain private witness material, so proving stays on this machine.
@@ -96,12 +102,18 @@ export const createBrowserProviderSession = async (
         window.location.origin,
         fetch.bind(window),
       );
+      const initializedProofProvider = httpClientProofProvider(
+        resolveProofServerUrl(configuration.proverServerUri),
+        initializedZkConfigProvider,
+      );
       const initializedProviders: AequiraProviders = {
         privateStateProvider,
-        proofProvider: httpClientProofProvider(
-          resolveProofServerUrl(configuration.proverServerUri),
-          initializedZkConfigProvider,
-        ),
+        proofProvider: {
+          proveTx: (transaction, config) =>
+            withDeploymentStage('proof-generation', () =>
+              initializedProofProvider.proveTx(transaction, config),
+            ),
+        },
         publicDataProvider: indexerPublicDataProvider(
           configuration.indexerUri,
           configuration.indexerWsUri,
@@ -113,30 +125,32 @@ export const createBrowserProviderSession = async (
         walletProvider: {
           getCoinPublicKey: () => shieldedAddresses.shieldedCoinPublicKey,
           getEncryptionPublicKey: () => shieldedAddresses.shieldedEncryptionPublicKey,
-          balanceTx: async (transaction: UnboundTransaction): Promise<FinalizedTransaction> => {
-            const balanced = await connectedApi.balanceUnsealedTransaction(
-              toHex(transaction.serialize()),
-            );
+          balanceTx: (transaction: UnboundTransaction): Promise<FinalizedTransaction> =>
+            withDeploymentStage('wallet-balancing', async () => {
+              const balanced = await connectedApi.balanceUnsealedTransaction(
+                toHex(transaction.serialize()),
+              );
 
-            return Transaction.deserialize<SignatureEnabled, Proof, Binding>(
-              'signature',
-              'proof',
-              'binding',
-              fromHex(balanced.tx),
-            );
-          },
+              return Transaction.deserialize<SignatureEnabled, Proof, Binding>(
+                'signature',
+                'proof',
+                'binding',
+                fromHex(balanced.tx),
+              );
+            }),
         },
         midnightProvider: {
-          submitTx: async (transaction: FinalizedTransaction): Promise<TransactionId> => {
-            await connectedApi.submitTransaction(toHex(transaction.serialize()));
-            const transactionId = transaction.identifiers()[0];
+          submitTx: (transaction: FinalizedTransaction): Promise<TransactionId> =>
+            withDeploymentStage('transaction-submission', async () => {
+              await connectedApi.submitTransaction(toHex(transaction.serialize()));
+              const transactionId = transaction.identifiers()[0];
 
-            if (transactionId === undefined) {
-              throw new Error('Submitted transaction did not expose an identifier');
-            }
+              if (transactionId === undefined) {
+                throw new Error('Submitted transaction did not expose an identifier');
+              }
 
-            return transactionId;
-          },
+              return transactionId;
+            }),
         },
       };
 

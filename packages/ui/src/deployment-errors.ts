@@ -3,7 +3,10 @@ import { PasswordValidationError, validatePassword } from '@midnight-ntwrk/midni
 export type DeploymentStage =
   | 'contract-deployment'
   | 'private-state'
+  | 'proof-generation'
   | 'provider-configuration'
+  | 'transaction-submission'
+  | 'wallet-balancing'
   | 'wallet-context';
 
 export class DeploymentStageError extends Error {
@@ -142,12 +145,22 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   }
 
   const message = collectErrorMessages(error);
+  const stage = findDeploymentStage(error);
 
   if (message.includes('reject') || message.includes('declin') || message.includes('cancel')) {
     return 'The deployment was cancelled in Lace. No contract was submitted.';
   }
   if (message.includes('outside midnight preprod')) {
     return 'Lace returned provider settings for another network. Select Midnight Preprod and retry.';
+  }
+  if (stage === 'proof-generation') {
+    return 'The local proof request failed before Lace balancing. AEQUIRA kept the private witness on this machine; confirm the proof server is running and retry.';
+  }
+  if (stage === 'wallet-balancing') {
+    return 'Lace could not balance the proven transaction. Confirm that the wallet is synced and has usable tDUST.';
+  }
+  if (stage === 'transaction-submission') {
+    return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
   }
   if (
     message.includes('proof server') ||
@@ -162,8 +175,6 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   if (message.includes('submit') || message.includes('transaction')) {
     return 'The Preprod transaction could not be submitted. Confirm Lace is synced and retry.';
   }
-
-  const stage = findDeploymentStage(error);
 
   if (stage === 'wallet-context') {
     return 'AEQUIRA could not read Lace Preprod configuration, tDUST, or shielded addresses. Unlock and sync Lace, then reconnect.';

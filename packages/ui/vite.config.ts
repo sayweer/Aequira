@@ -76,6 +76,13 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 3000,
+    proxy: {
+      '/__aequira_local': {
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__aequira_local/, ''),
+        target: 'http://127.0.0.1:6300',
+      },
+    },
     strictPort: true,
   },
 });
