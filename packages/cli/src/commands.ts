@@ -82,6 +82,16 @@ const clearPrivateState = (privateState: AequiraPrivateState): void => {
   privateState.scoreSalt.fill(0);
 };
 
+const assertWalletHasDust = async (wallet: AequiraWalletProvider): Promise<void> => {
+  const fundingState = await wallet.waitForFundingState();
+
+  if (fundingState.dustBalance <= 0n) {
+    throw new Error(
+      'Wallet has no Dust for transaction fees; fund NIGHT, run register-dust, then confirm funding-status before retrying',
+    );
+  }
+};
+
 const createFreshPrivateState = (): AequiraPrivateState =>
   createAequiraPrivateState(randomBytes(32), randomBytes(32), 0n, randomBytes(32));
 
@@ -221,7 +231,7 @@ export const runDeployCommand = async (
       walletSeed: secrets.walletSeed,
     });
     await runtime.wallet.start();
-    await runtime.wallet.waitForSync();
+    await assertWalletHasDust(runtime.wallet);
 
     const deployed = await (dependencies.deployContract ?? deployAequira)(runtime.providers, {
       roundId,
@@ -575,7 +585,7 @@ const runExistingPrivateStateCall = async (
       walletSeed: secrets.walletSeed,
     });
     await runtime.wallet.start();
-    await runtime.wallet.waitForSync();
+    await assertWalletHasDust(runtime.wallet);
 
     const contract = await joinForCall(
       runtime,
@@ -629,7 +639,7 @@ export const runCommitScoreCommand = async (
       walletSeed: secrets.walletSeed,
     });
     await runtime.wallet.start();
-    await runtime.wallet.waitForSync();
+    await assertWalletHasDust(runtime.wallet);
 
     const contract = await joinForCall(
       runtime,

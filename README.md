@@ -111,6 +111,10 @@ eligible NIGHT UTXO, it returns `submitted: false` without creating a
 transaction. Run `funding-status` again after the registration is processed to
 observe the current Dust balance.
 
+Deploy and state-changing contract commands stop before transaction construction
+when the synchronized Dust balance is zero. A positive balance is still not a
+guarantee that a particular transaction's full fee can be covered.
+
 Start the matrix-pinned proof server on the loopback interface:
 
 ```bash
