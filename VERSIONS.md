@@ -37,7 +37,7 @@
 | Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
 | Preprod node                          | 1.0.0         | Official compatibility matrix; remote service          |
 | Midnight Indexer                      | 4.3.3         | Official compatibility matrix; remote service          |
-| Proof server image                    | 8.1.0         | Running on `127.0.0.1:6300`; HTTP 200 verified         |
+| Proof server image                    | 8.1.0         | Loopback-only; AEQUIRA deploy proof verified           |
 | Lace                                  | Pending       | Verify during the L2 wallet milestone                  |
 
 ## Verification record
@@ -52,7 +52,10 @@ digest `sha256:801bbc0340e9e96f16735f77b523f23c7459e3359842f7c79c2c53f4e994d531`
 Docker publishes its port only on `127.0.0.1:6300`; the root endpoint returned
 HTTP 200 after all downloaded Zswap and Dust proving material was verified. The
 full Preprod `doctor` check passes for Node.js, 18 contract ZK assets, network
-node, indexer, and proof server.
+node, indexer, and proof server. A separate smoke test constructed an offline
+AEQUIRA deploy transaction from the compiled contract and its generated ZK
+assets, then successfully proved that transaction through the HTTP proof
+provider. The transaction was not balanced, funded, or submitted to Preprod.
 
 Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will

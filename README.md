@@ -48,8 +48,9 @@ The L1 reviewer allowlist is intentionally temporary: membership access reveals
 which pseudonymous reviewer acts. L2 will replace it with private Merkle
 membership before the contract can claim reviewer unlinkability.
 
-No contract is deployed yet. The matrix-pinned proof server is verified locally;
-the next L1 step is wallet funding and the first Preprod deployment.
+No contract is deployed yet. The matrix-pinned proof server is verified locally
+with an actual AEQUIRA deploy proof; the next L1 step is wallet funding and the
+first Preprod deployment.
 
 ## Requirements
 
@@ -122,7 +123,9 @@ pnpm proof-server:up
 
 The proof server processes private proving inputs, so the tracked Compose file
 publishes port `6300` only on `127.0.0.1`. Stop it with
-`pnpm proof-server:down`.
+`pnpm proof-server:down`. The current ARM64 image has also generated a real
+AEQUIRA deploy proof from an offline unproven transaction; that smoke test did
+not balance, fund, or submit the transaction.
 
 Inspect the public Preprod configuration:
 
