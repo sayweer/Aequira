@@ -1,8 +1,15 @@
 import { PasswordValidationError, validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 
 export type DeploymentStage =
+  | 'circuit-commit-score'
+  | 'circuit-phase-transition'
+  | 'circuit-register-reviewer'
+  | 'circuit-reveal-score'
   | 'contract-deployment'
+  | 'contract-join'
+  | 'ledger-query'
   | 'private-state'
+  | 'private-state-update'
   | 'proof-generation'
   | 'provider-configuration'
   | 'transaction-submission'
@@ -190,4 +197,119 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   }
 
   return 'The contract could not be deployed. No private value was displayed or written to Git.';
+};
+
+/**
+ * Assertion texts raised by the contract itself, in precedence order.
+ *
+ * These come from packages/contract/src/aequira.compact. They describe public
+ * round state only — never a score, a salt, or a secret — so surfacing them is
+ * both safe and the single most useful thing a failed call can say.
+ */
+const CONTRACT_ASSERTION_MESSAGES: readonly (readonly [string, string])[] = [
+  [
+    'only the round administrator',
+    'This browser is not the round administrator. Only the wallet that deployed the round can advance phases or register reviewers.',
+  ],
+  [
+    'reviewer is already registered',
+    'That reviewer pseudonym is already registered for this round.',
+  ],
+  [
+    'reviewer is not registered',
+    'This browser’s reviewer pseudonym is not registered for this round. Ask the organizer to register it during setup.',
+  ],
+  [
+    'reviewer already scored this application',
+    'This reviewer already committed a score for that application. The replay nullifier prevents a second one.',
+  ],
+  [
+    'reviewers can only be registered during setup',
+    'Reviewers can only be registered while the round is in setup.',
+  ],
+  [
+    'scores can only be committed during review',
+    'Scores can only be committed during the review phase. Refresh the round state and check the current phase.',
+  ],
+  [
+    'scores can only be revealed during reveal',
+    'Scores can only be revealed during the reveal phase. Refresh the round state and check the current phase.',
+  ],
+  [
+    'can only open after',
+    'That phase transition is not available from the current phase. Refresh the round state and retry.',
+  ],
+  ['score exceeds the rubric maximum', 'The committed score is above the rubric maximum of 100.'],
+  [
+    'matching score commitment was not found',
+    'That score does not open the commitment recorded on chain. Enter the exact score committed during review.',
+  ],
+];
+
+export const toCircuitErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.name === 'DustUnavailableError') {
+    return 'tDUST is not ready in Lace yet. Open the DUST Tank, finish generation, and retry.';
+  }
+
+  const connectorErrorCode = findConnectorErrorCode(error);
+
+  if (connectorErrorCode === 'PermissionRejected') {
+    return 'Lace did not grant the permissions needed for this call. Reconnect and approve the requested wallet permissions.';
+  }
+  if (connectorErrorCode === 'Rejected') {
+    return 'The request was cancelled in Lace. No transaction was submitted.';
+  }
+  if (connectorErrorCode === 'Disconnected') {
+    return 'The Lace session ended before the call completed. Reconnect the wallet and retry.';
+  }
+  if (connectorErrorCode === 'InvalidRequest') {
+    return 'Lace rejected a request it could not process. Confirm Lace is current, reconnect, and retry.';
+  }
+  if (connectorErrorCode === 'InternalError') {
+    return 'Lace could not process the call. Confirm that it is unlocked, synced, and has usable tDUST.';
+  }
+
+  const message = collectErrorMessages(error);
+
+  for (const [needle, explanation] of CONTRACT_ASSERTION_MESSAGES) {
+    if (message.includes(needle)) {
+      return explanation;
+    }
+  }
+
+  const stage = findDeploymentStage(error);
+
+  if (message.includes('reject') || message.includes('declin') || message.includes('cancel')) {
+    return 'The request was cancelled in Lace. No transaction was submitted.';
+  }
+  if (stage === 'proof-generation') {
+    return 'The proof request failed before Lace balancing. AEQUIRA kept the private witness on this machine; confirm the prover is available and retry.';
+  }
+  if (stage === 'wallet-balancing') {
+    return 'Lace could not balance the proven transaction. Confirm that the wallet is synced and has usable tDUST.';
+  }
+  if (stage === 'transaction-submission') {
+    return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
+  }
+  if (
+    message.includes('proof server') ||
+    message.includes('prover') ||
+    message.includes('failed to fetch')
+  ) {
+    return 'The prover could not be reached. Confirm the proof server is running and retry.';
+  }
+  if (message.includes('dust') || message.includes('insufficient') || message.includes('balance')) {
+    return 'Lace could not fund the transaction with tDUST. Confirm that the DUST Tank is ready.';
+  }
+  if (stage === 'private-state' || stage === 'private-state-update') {
+    return 'The encrypted browser storage could not be read or updated. Confirm browser storage is enabled and that this browser joined the round.';
+  }
+  if (stage === 'contract-join') {
+    return 'This browser could not join that contract. It may hold no reviewer secret for that address, or the address may not be an AEQUIRA round.';
+  }
+  if (stage === 'ledger-query') {
+    return 'The public round state could not be read from the indexer. It may still be catching up; this retries automatically.';
+  }
+
+  return 'The circuit call could not be completed. No private value was displayed.';
 };
