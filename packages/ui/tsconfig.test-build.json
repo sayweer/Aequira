@@ -14,6 +14,7 @@
     "src/provider-security.ts",
     "src/round-format.ts",
     "src/round-inputs.ts",
+    "src/session-storage.ts",
     "src/wallet.ts"
   ]
 }
