@@ -11,6 +11,7 @@
   },
   "include": [
     "src/deployment-errors.ts",
+    "src/proof-mode.ts",
     "src/provider-security.ts",
     "src/round-format.ts",
     "src/round-inputs.ts",
