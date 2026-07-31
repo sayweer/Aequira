@@ -31,7 +31,7 @@
 | `midnight-js-protocol`                | 4.1.1         | Installed direct dependency                            |
 | `midnight-js-network-id`              | 4.1.1         | Installed in contract tests and CLI runtime            |
 | Other `@midnight-ntwrk/midnight-js-*` | 4.1.1         | Narrow CLI provider dependencies installed             |
-| `@midnight-ntwrk/dapp-connector-api`  | 4.0.1         | Official matrix and current example; install pending   |
+| `@midnight-ntwrk/dapp-connector-api`  | 4.0.1         | Installed and used by the browser app                  |
 | `@midnight-ntwrk/testkit-js`          | 4.1.1         | Official matrix and current example; install pending   |
 | Wallet SDK                            | 1.2.0         | Installed direct CLI dependency                        |
 | Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
@@ -62,7 +62,9 @@ does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
 The AEQUIRA L1 contract compiled 6 state-changing circuits. The repository now
-passes 50 local `node:test` tests: 10 contract, 4 SDK, and 36 CLI/runtime tests.
+passes 124 tracked `node:test` tests: 10 contract, 9 SDK, 69 browser, and 36
+CLI/runtime tests. Tests and the generated `managed/` output are tracked in Git and
+run in CI.
 The CLI tests include encrypted-at-rest private-state checks, wrong-password
 failure, storage and backup permission checks, seed consumption, wallet
 lifecycle, prerequisite gating, secret cleanup, reviewer/admin orchestration,
