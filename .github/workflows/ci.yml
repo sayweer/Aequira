@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compact:
+    name: Compact compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Compact toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Update the toolchain
+        run: compact update
+
+      - name: Report versions
+        run: |
+          compact --version
+          compact compile --version
+
+      - name: Check contract formatting
+        run: compact format --check packages/contract/src/aequira.compact
+
+      # Compiles to a temporary directory so the tracked src/managed/ output is
+      # never overwritten by CI.
+      - name: Compile circuits
+        run: compact compile packages/contract/src/aequira.compact "$RUNNER_TEMP/managed-ci"
+
+      - name: Verify the generated circuits and keys
+        run: |
+          cd "$RUNNER_TEMP/managed-ci"
+          for circuit in commitScore openApplications openReveal openReview registerReviewer revealScore; do
+            test -s "keys/$circuit.prover"
+            test -s "keys/$circuit.verifier"
+            test -s "zkir/$circuit.zkir"
+            echo "ok $circuit"
+          done
+
+  verify:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm format:check
+
+      - run: pnpm lint
+
+      - run: pnpm build
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
