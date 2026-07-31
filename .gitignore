@@ -60,15 +60,7 @@ brand.md
 .github/instructions/
 .github/prompts/
 
-# Tests and test artifacts (kept local by project policy)
-**/test/
-**/tests/
-**/__tests__/
-**/__snapshots__/
-**/fixtures/
-*.test.*
-*.spec.*
-*.snap
+# Test artifacts. Test sources themselves are tracked.
 coverage/
 .nyc_output/
 .vitest/
@@ -97,14 +89,12 @@ out/
 .test-build/
 *.tsbuildinfo
 
-# Midnight / Compact generated artifacts and private state
-**/src/managed/
+# Midnight / Compact private state and derived asset copies.
+# packages/contract/src/managed/ is tracked: the program requires the generated
+# circuits and keys to be present, and the web build reads them from there.
 **/public/zk/
 **/public/keys/
 **/public/zkir/
-*.zkir
-*.prover
-*.verifier
 *.zkey
 .midnight/
 .private-state/
