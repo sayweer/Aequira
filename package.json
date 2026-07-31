@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present run build",
+    "build:web": "pnpm --filter @aequira/ui... run build",
     "compact:build": "pnpm --filter @aequira/contract run compact:build",
     "compact:check": "pnpm --filter @aequira/contract run compact:check",
     "format": "prettier --write .",
