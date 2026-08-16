@@ -9,26 +9,32 @@ and the tally is publicly verifiable once it is opened.
 |                      |                                                                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------- |
 | **Live demo**        | `TODO_DEMO_URL`                                                                                      |
+| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                |
 | **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                              |
 | **Network**          | Midnight Preprod                                                                                     |
 | **Circuits**         | 6 (`registerReviewer`, `openApplications`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
 | **Tests**            | 124 (`pnpm test`)                                                                                    |
 
+Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
+wallet, no Docker and no funded account.
+
 ---
 
 ## Initial product idea
 
-Scholarship, micro-grant and academic award decisions carry two problems at once.
-Applicants over-disclose: to prove they clear a threshold they hand over income
-statements, transcripts and residence records, when the only fact the panel needs
-is whether the threshold is met. Reviewers, meanwhile, know who they are judging,
-and once a decision is announced nobody can verify that it followed the announced
-rules. The two problems block each other's solution — anonymise the applicant and
-you can no longer verify eligibility; demand documents and you destroy the
-anonymity. AEQUIRA is the decision layer that resolves this: eligibility is proven
-without publishing the underlying values, scores are sealed until a reveal phase so
-no reviewer can be anchored or pressured by another's vote, and the final tally
-stays auditable against the rubric that was published up front.
+Scholarship, micro-grant and academic award decisions carry two problems that block
+each other's solution. Applicants over-disclose: to prove they clear a threshold they
+hand over income statements, transcripts and residence records, when the only fact the
+panel needs is whether the threshold is met. Reviewers, meanwhile, know who they are
+judging, and once a decision is announced nobody outside the room can check that it
+followed the announced rules. Anonymise the applicant and you can no longer verify
+eligibility; demand the documents and you destroy the anonymity.
+
+AEQUIRA is the decision layer that resolves the deadlock. Eligibility is proven without
+publishing the underlying values. Scores are sealed until a reveal phase, so no reviewer
+can be anchored or pressured by another's vote. The final tally stays auditable against
+the rubric that was published up front — the chain holds a proof that each score was
+valid long before it holds the score itself.
 
 ## Chosen problem: Private Voting
 
@@ -45,6 +51,49 @@ publicly verifiable tallies**, in its review-panel form:
 
 The ballot here carries a rubric score from 0 to 100 rather than a candidate choice,
 which makes the tally a sum instead of a count — otherwise the shape is the same.
+
+---
+
+## How a round works
+
+A round is a one-way phase machine. Every transition is administrator-gated, and every
+scoring circuit is refused outside its own phase.
+
+```mermaid
+stateDiagram-v2
+    [*] --> SETUP: deploy
+    SETUP --> SETUP: registerReviewer
+    SETUP --> APPLY: openApplications
+    APPLY --> REVIEW: openReview
+    REVIEW --> REVIEW: commitScore
+    REVIEW --> REVEAL: openReveal
+    REVEAL --> REVEAL: revealScore
+```
+
+| Circuit            | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                  |
+| ------------------ | ----------- | ------------------------- | ------------------------------------- | -------------------------------------------------- |
+| `registerReviewer` | `SETUP`     | `adminSecret`             | `reviewers`                           | rejects an already-registered pseudonym            |
+| `openApplications` | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
+| `openReview`       | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
+| `openReveal`       | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                           |
+| `commitScore`      | `REVIEW`    | membership in `reviewers` | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`   |
+| `revealScore`      | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed from the set once opened |
+
+Three properties are worth reading the contract for
+([`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact)):
+
+- **The score is range-proven while hidden.** `commitScore` asserts `score <= 100`
+  against a witness value and publishes only `persistentCommit(…score…, salt)`.
+- **The nullifier is scoped to one application.** It is derived from the round, the
+  application and the reviewer secret, so a reviewer scores each application at most
+  once but is not blocked from scoring the rest.
+- **Revealing consumes the commitment.** `revealScore` removes the commitment from
+  `scoreCommitments` before incrementing the tally, so the same ballot cannot be
+  counted twice.
+
+`Phase.FINALIZED` and `Phase.CLAIMED` are declared in the enum but no circuit
+transitions into them at this level. They are the reserved slots for award
+finalization and claiming, not dead code left behind.
 
 ---
 
@@ -71,6 +120,18 @@ that a valid score exists without the chain ever holding it.
 
 ## Privacy model
 
+### Who holds what
+
+| Role              | Holds privately                               | Can do                                                        | Cannot do                                                             |
+| ----------------- | --------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Administrator** | `adminSecret`                                 | register reviewers, advance the phase                         | read, alter or forge any score                                        |
+| **Reviewer**      | `reviewerSecret`, `reviewScore`, `reviewSalt` | score each application once, open their own score in `REVEAL` | score twice, read another reviewer's sealed score, score unregistered |
+| **Observer**      | nothing                                       | read the phase, the commitment count, the opened tally        | recover a score, a salt, or any secret                                |
+
+The administrator is deliberately powerless over ballots. `adminAuthority` is a
+domain-separated hash of the admin secret, so holding it proves the right to advance
+the round and nothing else — there is no circuit that lets it touch a commitment.
+
 ### What an observer can learn
 
 - The round phase, the round identifier, and the number of registered reviewers.
@@ -78,12 +139,6 @@ that a valid score exists without the chain ever holding it.
 - How many sealed commitments and nullifiers exist, and therefore how many scores
   were cast for each application.
 - After the reveal phase: the score sum and reviewer count per application.
-- **A known limitation at this level:** `commitScore` calls
-  `disclose(reviewerId)`, so an observer learns _which pseudonym scored which
-  application_. Scores stay hidden, but reviewer activity is linkable. Replacing the
-  hashed allowlist with a private Merkle membership proof is the next step; until
-  then AEQUIRA does not claim reviewer unlinkability. This is recorded in
-  [`SYNTAX.md`](SYNTAX.md) and admitted in a comment on the `disclose` call itself.
 
 ### What an observer cannot learn
 
@@ -91,6 +146,19 @@ that a valid score exists without the chain ever holding it.
 - The score salt, the reviewer secret, or the administrator secret.
 - Which wallet is behind a reviewer pseudonym.
 - Any score at all if the round never reaches the reveal phase.
+
+### Known limitation: reviewer activity is linkable
+
+`commitScore` calls `disclose(reviewerId)` in order to check the hashed allowlist on
+chain. An observer therefore learns _which pseudonym scored which application_ — the
+scores stay sealed, but reviewer activity is linkable across a round.
+
+This is a scoped trade-off, not an oversight: the allowlist is the simplest correct
+authorization primitive at this level, and replacing it with a private Merkle
+membership proof removes the disclosure without changing the commit–reveal flow. Until
+that lands, AEQUIRA does not claim reviewer unlinkability. The limitation is written
+into a comment on the `disclose` call itself, on the `reviewers` ledger declaration,
+and in [`SYNTAX.md`](SYNTAX.md).
 
 ### Observable privacy behaviour
 
@@ -105,6 +173,40 @@ asserted not to contain the committed score
 A second, inverted demonstration: revealing with the wrong score is refused in the
 browser before any transaction is built, because this machine can recompute the
 commitment and check the opening itself.
+
+---
+
+## Verify this in five minutes
+
+No wallet, no Docker, no funded account, no Compact toolchain. Node.js `24.11.1`+ and
+pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git:
+
+```bash
+pnpm install
+pnpm test            # 124 tests: 10 contract, 9 sdk, 69 ui, 36 cli
+```
+
+With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
+from source and prints the 6 circuits. CI does the same on every push in a separate
+job: it compiles into a temporary directory — never over the tracked output — and then
+asserts that all six circuits produced a non-empty prover key, verifier key and ZKIR.
+
+Then read four things, in this order:
+
+1. [`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact) —
+   every `disclose()` has a comment next to it justifying the disclosure. That is the
+   whole privacy argument, in one file.
+2. [`packages/ui/test/privacy-view.test.mjs`](packages/ui/test/privacy-view.test.mjs) —
+   asserts the serialized public ledger view never contains a committed score.
+3. [`packages/ui/src/round-salt.ts`](packages/ui/src/round-salt.ts) — why the salt is
+   derived rather than random, explained under [Architecture](#architecture).
+4. [`packages/contract/src/managed/`](packages/contract/src/managed) — 24 generated ZK
+   assets (prover key, verifier key, ZKIR and binary ZKIR per circuit), tracked in Git
+   so the build output is reviewable without running the compiler.
+
+On the live demo, the three clicks that show the privacy claim are: commit a score →
+open the disclosure panel and search the public record for that number → reveal, and
+watch the on-chain sum move to match.
 
 ---
 
@@ -235,6 +337,14 @@ can read back into an empty store without overwriting anything.
 
 ---
 
+## Demo video
+
+`TODO_DEMO_VIDEO_URL`
+
+The recording walks one round end to end: Lace connect on Preprod → deploy → register
+the reviewer pseudonym → commit a sealed score with the disclosure panel in frame →
+open reveal → reveal, and the on-chain tally moving to match the opened score.
+
 ## Screenshots
 
 |                                 |                                                     |
@@ -259,6 +369,8 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 ## Level checklist
 
+**Level 1 — contract, tests, deployment**
+
 | Requirement                                | Where                                                                            |
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
@@ -267,11 +379,23 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
-| Lace connect / disconnect                  | `packages/ui/src/hooks/useWalletConnection.ts`                                   |
-| Circuit called from the frontend           | `packages/ui/src/round.ts`; all six circuits                                     |
-| Observable privacy behaviour               | [Observable privacy behaviour](#observable-privacy-behaviour)                    |
-| Live demo link                             | table at the top of this file                                                    |
-| Minimum 3 tests passing                    | 124                                                                              |
-| CI/CD pipeline                             | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above             |
-| Approved idea from the provided list       | [Chosen problem: Private Voting](#chosen-problem-private-voting)                 |
-| Privacy model section                      | [Privacy model](#privacy-model)                                                  |
+| Meaningful commit history                  | `git log --oneline` — 39 commits                                                 |
+
+**Level 2 — wallet, frontend, observable privacy**
+
+| Requirement                      | Where                                                         |
+| -------------------------------- | ------------------------------------------------------------- |
+| Lace connect / disconnect        | `packages/ui/src/hooks/useWalletConnection.ts`                |
+| Circuit called from the frontend | `packages/ui/src/round.ts`; all six circuits                  |
+| Observable privacy behaviour     | [Observable privacy behaviour](#observable-privacy-behaviour) |
+| Live demo link                   | table at the top of this file                                 |
+| Demo video                       | [Demo video](#demo-video)                                     |
+
+**Level 3 — production dApp**
+
+| Requirement                          | Where                                                                |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| Minimum 3 tests passing              | 124                                                                  |
+| CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
+| Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
+| Privacy model section                | [Privacy model](#privacy-model)                                      |
