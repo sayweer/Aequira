@@ -19,10 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Downloaded to a file rather than piped into sh: in a pipeline the shell
+      # reports sh's status, so a failed download used to pass this step and
+      # surface later as "compact: command not found".
       - name: Install the Compact toolchain
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf --retry 5 --retry-all-errors \
+            https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh \
+            -o "$RUNNER_TEMP/compact-installer.sh"
+          sh "$RUNNER_TEMP/compact-installer.sh"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Update the toolchain
