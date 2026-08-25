@@ -11,8 +11,10 @@ import {
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
+  deriveScoreSalt,
   joinAequira,
   queryAequiraLedger,
+  readRoundId,
   setAequiraPrivateState,
   type AequiraPrivateState,
   type AequiraProviders,
@@ -28,7 +30,6 @@ import { deployNewAequira } from './deployment.js';
 import type { ProofMode } from './proof-mode.js';
 import { bytesToHex, hexToBytes, toRoundView, type RoundView } from './round-format.js';
 import { parseApplicationId, parseContractAddressInput, parseReviewerId } from './round-inputs.js';
-import { deriveScoreSalt } from './round-salt.js';
 
 export type RoundSession = {
   readonly address: ContractAddress;
@@ -57,21 +58,6 @@ export type ScoreInput = {
   readonly score: number;
 };
 
-const readRoundId = async (
-  providers: AequiraProviders,
-  address: ContractAddress,
-): Promise<Uint8Array> => {
-  const ledger = await withDeploymentStage('ledger-query', () =>
-    queryAequiraLedger(providers, address),
-  );
-
-  if (ledger === null) {
-    throw new Error('The indexer has not seen that contract address yet');
-  }
-
-  return Uint8Array.from(ledger.roundId);
-};
-
 const toRoundSession = async (
   session: BrowserProviderSession,
   address: ContractAddress,
@@ -82,7 +68,7 @@ const toRoundSession = async (
   contract,
   proofMode: session.proofMode,
   providers: session.providers,
-  roundId: await readRoundId(session.providers, address),
+  roundId: await withDeploymentStage('ledger-query', () => readRoundId(session.providers, address)),
 });
 
 export const deployRound = async (
@@ -169,7 +155,8 @@ export const advancePhase = async (
  * Rebuilds the opening for a score without touching the network.
  *
  * The salt is derived rather than stored, so the same score always produces the
- * same commitment for the same application. See round-salt.ts.
+ * same commitment for the same application. See `deriveScoreSalt` in
+ * `@aequira/sdk`.
  */
 const buildOpening = async (
   session: RoundSession,

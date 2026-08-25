@@ -5,6 +5,7 @@ import {
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
+  deriveScoreSalt,
   validateAequiraPrivateState,
 } from '../dist/index.js';
 
@@ -134,6 +135,68 @@ describe('AEQUIRA SDK public value derivation', () => {
     assert.throws(
       () => deriveScoreCommitment(roundId, applicationId, 101n, reviewerSecret, scoreSalt),
       /score must be between 0 and 100/,
+    );
+  });
+});
+
+describe('AEQUIRA SDK score salt derivation', () => {
+  const roundId = filled(1);
+  const applicationA = filled(2);
+  const applicationB = filled(3);
+  const reviewerSecret = filled(4);
+
+  test('derives a 32-byte salt', async () => {
+    assert.equal((await deriveScoreSalt(roundId, applicationA, reviewerSecret)).byteLength, 32);
+  });
+
+  test('derives the same salt again, so a reveal can reproduce the commitment', async () => {
+    assert.deepEqual(
+      await deriveScoreSalt(roundId, applicationA, reviewerSecret),
+      await deriveScoreSalt(roundId, applicationA, reviewerSecret),
+    );
+  });
+
+  test('derives a different salt per application, so scoring one does not break another', async () => {
+    // This is the regression case for a real bug: a random-per-commit salt
+    // (rather than one derived from applicationId) silently strands the
+    // reveal of any application scored earlier by the same reviewer, once a
+    // second application is scored.
+    assert.notDeepEqual(
+      await deriveScoreSalt(roundId, applicationA, reviewerSecret),
+      await deriveScoreSalt(roundId, applicationB, reviewerSecret),
+    );
+  });
+
+  test('derives a different salt per round and per reviewer', async () => {
+    const salt = await deriveScoreSalt(roundId, applicationA, reviewerSecret);
+
+    assert.notDeepEqual(await deriveScoreSalt(filled(9), applicationA, reviewerSecret), salt);
+    assert.notDeepEqual(await deriveScoreSalt(roundId, applicationA, filled(9)), salt);
+  });
+
+  test('never returns the reviewer secret or any input verbatim', async () => {
+    const salt = await deriveScoreSalt(roundId, applicationA, reviewerSecret);
+
+    assert.notDeepEqual(salt, reviewerSecret);
+    assert.notDeepEqual(salt, roundId);
+    assert.notDeepEqual(salt, applicationA);
+  });
+
+  test('does not mutate its inputs', async () => {
+    const secret = filled(4);
+    await deriveScoreSalt(roundId, applicationA, secret);
+
+    assert.deepEqual(secret, filled(4));
+  });
+
+  test('rejects inputs that are not 32 bytes', async () => {
+    await assert.rejects(
+      () => deriveScoreSalt(bytes(31), applicationA, reviewerSecret),
+      /roundId must contain exactly 32 bytes/,
+    );
+    await assert.rejects(
+      () => deriveScoreSalt(roundId, applicationA, bytes(33)),
+      /reviewerSecret must contain exactly 32 bytes/,
     );
   });
 });

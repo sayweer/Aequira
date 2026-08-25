@@ -285,19 +285,21 @@ packages/ui         React + Vite browser app
 Two conventions are worth knowing before reading the UI:
 
 **Testable logic lives outside React.** `round-inputs`, `round-format`,
-`round-salt`, `privacy-view`, `session-storage` and `proof-mode` are pure modules
-with `node:test` coverage; components stay dumb.
+`privacy-view`, `session-storage` and `proof-mode` are pure modules with
+`node:test` coverage; components stay dumb.
 `packages/ui/tsconfig.test-build.json` lists exactly what the test build compiles.
 
 **The score salt is derived, not random.** `AequiraPrivateState` holds one
 `scoreSalt`, and `revealScore` must reproduce the exact `(score, salt)` pair behind
 the on-chain commitment — so a fresh random salt per commit silently destroys the
-opening of every application a reviewer already scored. The browser derives it as
+opening of every application a reviewer already scored. Both the browser and the
+CLI derive it as
 `SHA-256("aequira:ui-salt:v1" || roundId || applicationId || reviewerSecret)`
-instead. It stays secret because it is seeded with 256 bits of reviewer secret,
-which matters: a score carries roughly seven bits of entropy and an unsalted
-commitment would be trivially brute-forced. See
-[`packages/ui/src/round-salt.ts`](packages/ui/src/round-salt.ts).
+instead, via the shared `deriveScoreSalt` in the SDK. It stays secret because it
+is seeded with 256 bits of reviewer secret, which matters: a score carries
+roughly seven bits of entropy and an unsalted commitment would be trivially
+brute-forced. See
+[`packages/sdk/src/client.ts`](packages/sdk/src/client.ts).
 
 Static analysis is TypeScript in strict mode with `exactOptionalPropertyTypes` and
 `noUncheckedIndexedAccess`; there is no separate linter.

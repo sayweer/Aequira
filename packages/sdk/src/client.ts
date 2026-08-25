@@ -158,3 +158,73 @@ export const queryAequiraLedger = async (
 
   return contractState === null ? null : ledger(contractState.data);
 };
+
+/**
+ * Reads the round's public `roundId` off the ledger.
+ *
+ * Both `commitScore` and `revealScore` need this to derive a per-application
+ * score salt (see {@link deriveScoreSalt}) — reading it from one place keeps
+ * callers from disagreeing about where it comes from.
+ */
+export const readRoundId = async (
+  providers: AequiraProviders,
+  contractAddress: ContractAddress,
+): Promise<Uint8Array> => {
+  const ledgerState = await queryAequiraLedger(providers, contractAddress);
+
+  if (ledgerState === null) {
+    throw new Error('The indexer has not seen that contract address yet');
+  }
+
+  return Uint8Array.from(ledgerState.roundId);
+};
+
+const SCORE_SALT_DOMAIN = 'aequira:ui-salt:v1';
+
+/**
+ * Derives the score salt deterministically instead of drawing it at random.
+ *
+ * `AequiraPrivateState` holds exactly one `scoreSalt`, and `revealScore` must
+ * reproduce the same `(score, salt)` pair that produced the on-chain
+ * commitment. A fresh random salt per commit therefore destroys the opening
+ * of every application scored earlier by the same reviewer, because
+ * `assert(scoreCommitments.member(...))` no longer matches.
+ *
+ * Deriving from the reviewer secret fixes that without changing the contract
+ * or the private state shape:
+ *
+ *   salt = SHA-256("aequira:ui-salt:v1" || roundId || applicationId || reviewerSecret)
+ *
+ * The salt stays secret because it is seeded with 256 bits of reviewerSecret.
+ * It must stay secret: a score carries roughly seven bits of entropy, so an
+ * observer who knew the salt could brute-force the commitment. Being
+ * deterministic costs nothing here — an observer still cannot compute a
+ * single candidate commitment without the reviewer secret.
+ *
+ * L2 direction: hold per-application salts inside private state, which
+ * removes the derivation entirely at the cost of a private state migration.
+ */
+export const deriveScoreSalt = async (
+  roundId: Uint8Array,
+  applicationId: Uint8Array,
+  reviewerSecret: Uint8Array,
+): Promise<Uint8Array> => {
+  assertBytes32('roundId', roundId);
+  assertBytes32('applicationId', applicationId);
+  assertBytes32('reviewerSecret', reviewerSecret);
+
+  const domain = new TextEncoder().encode(SCORE_SALT_DOMAIN);
+  const input = new Uint8Array(domain.length + BYTE_LENGTH * 3);
+
+  input.set(domain, 0);
+  input.set(roundId, domain.length);
+  input.set(applicationId, domain.length + BYTE_LENGTH);
+  input.set(reviewerSecret, domain.length + BYTE_LENGTH * 2);
+
+  try {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', input));
+  } finally {
+    // The buffer held the reviewer secret in the clear.
+    input.fill(0);
+  }
+};
