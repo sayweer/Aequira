@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AEQUIRA_PRIVATE_STATE_ID } from '@aequira/sdk';
+import { AEQUIRA_PRIVATE_STATE_ID, deriveScoreSalt } from '@aequira/sdk';
 import {
   sampleContractAddress,
   sampleSigningKey,
@@ -999,7 +999,9 @@ describe('AEQUIRA CLI administrator commands', () => {
 });
 
 describe('AEQUIRA CLI score commands', () => {
-  test('commits a masked score, persists its fresh salt, and returns only public tx data', async () => {
+  const roundId = new Uint8Array(32).fill(6);
+
+  test('commits a masked score, deriving its salt from the round and application', async () => {
     const privateState = {
       adminSecret: new Uint8Array(32).fill(1),
       reviewerSecret: new Uint8Array(32).fill(2),
@@ -1009,6 +1011,7 @@ describe('AEQUIRA CLI score commands', () => {
     const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
     const walletSeed = new Uint8Array(32).fill(7);
     const contractAddress = sampleContractAddress();
+    const applicationId = new Uint8Array(32).fill(0xab);
     let capturedApplicationId;
     const result = await runCommitScoreCommand(
       loadCliConfig({ environment: {} }),
@@ -1022,11 +1025,12 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
         joinContract: async () => ({
           callTx: {
-            commitScore: async (applicationId) => {
+            commitScore: async (submittedApplicationId) => {
               calls.push('commit-score');
-              capturedApplicationId = Uint8Array.from(applicationId);
+              capturedApplicationId = Uint8Array.from(submittedApplicationId);
               return { public: finalizedPublicData };
             },
           },
@@ -1047,9 +1051,9 @@ describe('AEQUIRA CLI score commands', () => {
     });
     assert.deepEqual(Array.from(capturedApplicationId), Array(32).fill(0xab));
     assert.equal(getStoredPrivateState().score, 87n);
-    assert.equal(
-      getStoredPrivateState().scoreSalt.some((byte) => byte !== 0),
-      true,
+    assert.deepEqual(
+      Array.from(getStoredPrivateState().scoreSalt),
+      Array.from(await deriveScoreSalt(roundId, applicationId, privateState.reviewerSecret)),
     );
     assert.deepEqual(calls, [
       'start',
@@ -1072,16 +1076,21 @@ describe('AEQUIRA CLI score commands', () => {
     ]);
   });
 
-  test('reveals the score already stored in encrypted private state', async () => {
+  test('reveals a score by re-deriving its opening, not by trusting whatever private state currently holds', async () => {
+    // Simulates the exact regression this fixes: the single scoreSalt slot
+    // still holds a *different* application's opening (as it would right
+    // after committing that other application), yet revealing this
+    // application must still recompute the correct (score, salt) for it.
     const privateState = {
       adminSecret: new Uint8Array(32).fill(1),
       reviewerSecret: new Uint8Array(32).fill(2),
-      score: 87n,
-      scoreSalt: new Uint8Array(32).fill(3),
+      score: 42n,
+      scoreSalt: new Uint8Array(32).fill(9),
     };
-    const { calls, runtime } = createCommandRuntime(privateState);
+    const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
     const walletSeed = new Uint8Array(32).fill(8);
     const contractAddress = sampleContractAddress();
+    const applicationId = new Uint8Array(32).fill(0xcd);
     const result = await runRevealScoreCommand(
       loadCliConfig({ environment: {} }),
       contractAddress,
@@ -1092,12 +1101,14 @@ describe('AEQUIRA CLI score commands', () => {
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
           walletSeed,
         }),
+        promptSecret: async () => '87',
         createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
         joinContract: async () => ({
           callTx: {
-            revealScore: async (applicationId) => {
+            revealScore: async (submittedApplicationId) => {
               calls.push('reveal-score');
-              assert.deepEqual(Array.from(applicationId), Array(32).fill(0xcd));
+              assert.deepEqual(Array.from(submittedApplicationId), Array(32).fill(0xcd));
               return { public: finalizedPublicData };
             },
           },
@@ -1110,7 +1121,19 @@ describe('AEQUIRA CLI score commands', () => {
     );
 
     assert.equal(result.transactionId, 'tx-id-1');
-    assert.deepEqual(calls, ['start', 'funding', 'reveal-score', 'backup', 'close']);
+    assert.equal(getStoredPrivateState().score, 87n);
+    assert.deepEqual(
+      Array.from(getStoredPrivateState().scoreSalt),
+      Array.from(await deriveScoreSalt(roundId, applicationId, privateState.reviewerSecret)),
+    );
+    assert.deepEqual(calls, [
+      'start',
+      'funding',
+      'set-private-state',
+      'reveal-score',
+      'backup',
+      'close',
+    ]);
     assert.equal(
       walletSeed.every((byte) => byte === 0),
       true,
@@ -1128,7 +1151,9 @@ describe('AEQUIRA CLI score commands', () => {
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
           walletSeed: new Uint8Array(32).fill(9),
         }),
+        promptSecret: async () => '87',
         createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
         joinContract: async () => ({
           callTx: {
             revealScore: async () => {
@@ -1161,7 +1186,9 @@ describe('AEQUIRA CLI score commands', () => {
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
           walletSeed: new Uint8Array(32).fill(9),
         }),
+        promptSecret: async () => '87',
         createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
         joinContract: async () => ({
           callTx: {
             revealScore: async () => ({ public: finalizedPublicData }),
@@ -1177,6 +1204,87 @@ describe('AEQUIRA CLI score commands', () => {
         error.message.includes('Do not submit the call again') &&
         !error.message.includes('/local/private-state'),
     );
+  });
+
+  test('commits two different applications for the same reviewer without stranding either one', async () => {
+    // The concrete failure scenario the fix addresses: a random-per-commit
+    // salt would leave application A's opening unrecoverable once
+    // application B is committed, because the single scoreSalt/score slot
+    // gets overwritten. With deterministic, per-application derivation, both
+    // stay independently revealable.
+    const reviewerSecret = new Uint8Array(32).fill(2);
+    const privateState = {
+      adminSecret: new Uint8Array(32).fill(1),
+      reviewerSecret,
+      score: 0n,
+      scoreSalt: new Uint8Array(32).fill(3),
+    };
+    const { getStoredPrivateState, runtime } = createCommandRuntime(privateState);
+    const contractAddress = sampleContractAddress();
+    const applicationA = new Uint8Array(32).fill(0xaa);
+    const applicationB = new Uint8Array(32).fill(0xbb);
+
+    const commitDependencies = (score) => ({
+      runPrerequisiteChecks: async () => readyChecks,
+      readSecrets: async () => ({
+        privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+        walletSeed: new Uint8Array(32).fill(7),
+      }),
+      promptSecret: async () => score,
+      createRuntime: async () => runtime,
+      readRoundId: async () => roundId,
+      joinContract: async () => ({
+        callTx: {
+          commitScore: async () => ({ public: finalizedPublicData }),
+        },
+      }),
+      writeBackup: async () => '/ignored/commit-score.json',
+    });
+
+    await runCommitScoreCommand(
+      loadCliConfig({ environment: {} }),
+      contractAddress,
+      Buffer.from(applicationA).toString('hex'),
+      commitDependencies('60'),
+    );
+    const saltAfterA = getStoredPrivateState().scoreSalt;
+
+    await runCommitScoreCommand(
+      loadCliConfig({ environment: {} }),
+      contractAddress,
+      Buffer.from(applicationB).toString('hex'),
+      commitDependencies('75'),
+    );
+    const saltAfterB = getStoredPrivateState().scoreSalt;
+
+    assert.notDeepEqual(Array.from(saltAfterA), Array.from(saltAfterB));
+
+    // Revealing A afterwards must recompute A's own opening, not reuse
+    // whatever B's commit left behind in the single private-state slot.
+    const revealResult = await runRevealScoreCommand(
+      loadCliConfig({ environment: {} }),
+      contractAddress,
+      Buffer.from(applicationA).toString('hex'),
+      {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(8),
+        }),
+        promptSecret: async () => '60',
+        createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
+        joinContract: async () => ({
+          callTx: {
+            revealScore: async () => ({ public: finalizedPublicData }),
+          },
+        }),
+        writeBackup: async () => '/ignored/reveal-score.json',
+      },
+    );
+
+    assert.equal(revealResult.transactionId, 'tx-id-1');
+    assert.deepEqual(Array.from(getStoredPrivateState().scoreSalt), Array.from(saltAfterA));
   });
 });
 

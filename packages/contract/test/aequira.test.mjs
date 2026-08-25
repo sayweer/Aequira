@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import { describe, test } from 'node:test';
 
 import {
@@ -281,5 +282,71 @@ describe('AEQUIRA L1 contract', () => {
 
     assert.equal(simulator.getLedger().scoreSums.lookup(context.applicationId).read(), 140n);
     assert.equal(simulator.getLedger().revealedCounts.lookup(context.applicationId).read(), 2n);
+  });
+
+  test('reveals both applications for one reviewer when the salt is derived per application', async () => {
+    // Regression coverage for a real bug class: `AequiraPrivateState` holds
+    // exactly one `scoreSalt`, so a fresh random salt per commit (as the CLI
+    // used to generate) silently strands the reveal of any application
+    // scored earlier by the same reviewer once a second one is committed.
+    // The fix (packages/sdk/src/client.ts's `deriveScoreSalt`) makes the salt
+    // a deterministic function of (roundId, applicationId, reviewerSecret),
+    // so both applications stay independently revealable. This exercises the
+    // real compiled circuits directly, which the CLI's mocked unit tests
+    // cannot: there, `commitTx`/`revealTx` are stubs and never check that the
+    // recomputed commitment actually matches what's on the ledger.
+    const deriveScoreSalt = async (roundId, applicationId, reviewerSecret) => {
+      const domain = new TextEncoder().encode('aequira:ui-salt:v1');
+      const input = new Uint8Array(domain.length + 32 * 3);
+      input.set(domain, 0);
+      input.set(roundId, domain.length);
+      input.set(applicationId, domain.length + 32);
+      input.set(reviewerSecret, domain.length + 64);
+      return new Uint8Array(await webcrypto.subtle.digest('SHA-256', input));
+    };
+
+    const roundId = bytes(11);
+    const adminSecret = bytes(22);
+    const reviewerSecret = bytes(33);
+    const applicationA = bytes(55);
+    const applicationB = bytes(56);
+    const scoreA = 87n;
+    const scoreB = 42n;
+    const saltA = await deriveScoreSalt(roundId, applicationA, reviewerSecret);
+    const saltB = await deriveScoreSalt(roundId, applicationB, reviewerSecret);
+
+    assert.notDeepEqual(saltA, saltB);
+
+    const simulator = new AequiraSimulator({
+      roundId,
+      adminSecret,
+      reviewerSecret,
+      score: scoreA,
+      scoreSalt: saltA,
+    });
+    simulator.call('registerReviewer', pureCircuits.reviewerId(reviewerSecret));
+    simulator.call('openApplications');
+    simulator.call('openReview');
+
+    simulator.call('commitScore', applicationA);
+    // Committing a second application overwrites the single scoreSalt/score
+    // slot, exactly as it would between two `commit-score` CLI invocations.
+    simulator.setPrivateState({ score: scoreB, scoreSalt: saltB });
+    simulator.call('commitScore', applicationB);
+
+    simulator.call('openReveal');
+
+    // Revealing A must recompute A's own opening rather than reuse whatever
+    // committing B left behind.
+    simulator.setPrivateState({ score: scoreA, scoreSalt: saltA });
+    simulator.call('revealScore', applicationA);
+    simulator.setPrivateState({ score: scoreB, scoreSalt: saltB });
+    simulator.call('revealScore', applicationB);
+
+    const ledger = simulator.getLedger();
+    assert.equal(ledger.scoreSums.lookup(applicationA).read(), scoreA);
+    assert.equal(ledger.scoreSums.lookup(applicationB).read(), scoreB);
+    assert.equal(ledger.revealedCounts.lookup(applicationA).read(), 1n);
+    assert.equal(ledger.revealedCounts.lookup(applicationB).read(), 1n);
   });
 });

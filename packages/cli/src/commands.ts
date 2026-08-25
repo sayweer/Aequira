@@ -5,7 +5,9 @@ import {
   createAequiraPrivateState,
   deployAequira,
   deriveReviewerId,
+  deriveScoreSalt,
   joinAequira,
+  readRoundId,
   setAequiraPrivateState,
   validateAequiraPrivateState,
   type AequiraPrivateState,
@@ -106,6 +108,7 @@ export type CommandDependencies = {
   readonly joinContract?: typeof joinAequira;
   readonly promptSecret?: SecretPrompt;
   readonly readBackup?: typeof readRuntimeBackup;
+  readonly readRoundId?: typeof readRoundId;
   readonly readSecrets?: (
     config: CliConfig,
     promptSecret?: SecretPrompt,
@@ -670,14 +673,29 @@ const runExistingPrivateStateCall = async (
   }
 };
 
-export const runCommitScoreCommand = async (
+/**
+ * Rebuilds the opening for a score before submitting `commitScore` or
+ * `revealScore`.
+ *
+ * `AequiraPrivateState` holds exactly one `scoreSalt`, and `revealScore` must
+ * reproduce the same `(score, salt)` pair that produced the on-chain
+ * commitment. Deriving the salt from `(roundId, applicationId,
+ * reviewerSecret)` via `deriveScoreSalt`, and re-prompting for the score on
+ * every call, means each application gets its own opening regardless of what
+ * was committed or revealed for a different application in between — a fixed
+ * random salt per commit would instead silently strand the reveal of any
+ * previously scored application. See `packages/ui/src/round.ts`'s
+ * `buildOpening`, which follows the same pattern.
+ */
+const runScoreOpeningCall = async (
   config: CliConfig,
-  contractAddressValue: string,
-  applicationIdHex: string,
-  dependencies: CommandDependencies = {},
+  contractAddress: ContractAddress,
+  applicationId: Uint8Array,
+  circuit: AequiraCallName,
+  scorePrompt: string,
+  submitCall: SubmitContractCall,
+  dependencies: CommandDependencies,
 ): Promise<TransactionCommandResult> => {
-  const contractAddress = parseContractAddress(contractAddressValue);
-  const applicationId = parseBytes32('application ID', applicationIdHex);
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
@@ -687,7 +705,7 @@ export const runCommitScoreCommand = async (
   let runtime: AequiraRuntime | undefined;
 
   try {
-    const score = parseScore(await promptSecret('Review score (0-100): '));
+    const score = parseScore(await promptSecret(scorePrompt));
     runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
       config,
       privateStatePassword: secrets.privateStatePassword,
@@ -702,20 +720,26 @@ export const runCommitScoreCommand = async (
       dependencies.joinContract ?? joinAequira,
     );
     currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
+    const reviewerSecret = Uint8Array.from(currentPrivateState.reviewerSecret);
+    const roundId = await (dependencies.readRoundId ?? readRoundId)(
+      runtime.providers,
+      contractAddress,
+    );
+    const scoreSalt = await deriveScoreSalt(roundId, applicationId, reviewerSecret);
     nextPrivateState = createAequiraPrivateState(
       Uint8Array.from(currentPrivateState.adminSecret),
-      Uint8Array.from(currentPrivateState.reviewerSecret),
+      reviewerSecret,
       score,
-      randomBytes(32),
+      scoreSalt,
     );
     await setAequiraPrivateState(runtime.providers, contractAddress, nextPrivateState);
 
-    const txData = await contract.callTx.commitScore(applicationId);
+    const txData = await submitCall(contract);
     const backupPath = await writeFinalizedCallBackup(
       secrets.privateStatePassword,
       config,
       contractAddress,
-      'commitScore',
+      circuit,
       txData.public,
       runtime,
       dependencies.writeBackup ?? writeRuntimeBackup,
@@ -735,6 +759,25 @@ export const runCommitScoreCommand = async (
   }
 };
 
+export const runCommitScoreCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  applicationIdHex: string,
+  dependencies: CommandDependencies = {},
+): Promise<TransactionCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const applicationId = parseBytes32('application ID', applicationIdHex);
+  return runScoreOpeningCall(
+    config,
+    contractAddress,
+    applicationId,
+    'commitScore',
+    'Review score (0-100): ',
+    (contract) => contract.callTx.commitScore(applicationId),
+    dependencies,
+  );
+};
+
 export const runRevealScoreCommand = async (
   config: CliConfig,
   contractAddressValue: string,
@@ -743,10 +786,12 @@ export const runRevealScoreCommand = async (
 ): Promise<TransactionCommandResult> => {
   const contractAddress = parseContractAddress(contractAddressValue);
   const applicationId = parseBytes32('application ID', applicationIdHex);
-  return runExistingPrivateStateCall(
+  return runScoreOpeningCall(
     config,
     contractAddress,
+    applicationId,
     'revealScore',
+    'Score to reveal (0-100): ',
     (contract) => contract.callTx.revealScore(applicationId),
     dependencies,
   );

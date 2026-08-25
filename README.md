@@ -331,9 +331,12 @@ pnpm --filter @aequira/cli start reveal-score      --network preprod --contract-
 ```
 
 Secrets are only ever read through masked interactive prompts; the argument parser
-rejects `--seed`, `--password`, `--score` and similar outright. `commit-score`
-prompts for the score and generates its salt internally. Deploy and state-changing
-calls stop before building a transaction when the synchronized Dust balance is zero.
+rejects `--seed`, `--password`, `--score` and similar outright. Both `commit-score`
+and `reveal-score` prompt for the score and derive its salt deterministically
+(see above) — `reveal-score` re-prompts rather than trusting whatever the
+single private-state slot currently holds, so revealing one application still
+works after committing a different one. Deploy and state-changing calls stop
+before building a transaction when the synchronized Dust balance is zero.
 Successful calls write an encrypted, password-authenticated backup that `restore`
 can read back into an empty store without overwriting anything.
 
