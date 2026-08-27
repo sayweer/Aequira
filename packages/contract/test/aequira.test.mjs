@@ -19,8 +19,11 @@ setNetworkId('undeployed');
 const bytes = (value) => new Uint8Array(32).fill(value);
 
 class AequiraSimulator {
-  constructor({ roundId, adminSecret, reviewerSecret, score, scoreSalt }) {
-    this.contract = new Contract(witnesses);
+  // `witnessOverrides` stands in for a tampered client: the circuit must hold
+  // even when the witness returns something the honest implementation never
+  // would.
+  constructor({ roundId, adminSecret, reviewerSecret, score, scoreSalt, witnessOverrides = {} }) {
+    this.contract = new Contract({ ...witnesses, ...witnessOverrides });
     const privateState = {
       adminSecret,
       reviewerSecret,
@@ -64,7 +67,7 @@ class AequiraSimulator {
   }
 }
 
-const setupReview = ({ score = 87n } = {}) => {
+const setupReview = ({ score = 87n, witnessOverrides, alsoRegister = [] } = {}) => {
   const roundId = bytes(11);
   const adminSecret = bytes(22);
   const reviewerSecret = bytes(33);
@@ -76,9 +79,15 @@ const setupReview = ({ score = 87n } = {}) => {
     reviewerSecret,
     score,
     scoreSalt,
+    ...(witnessOverrides === undefined ? {} : { witnessOverrides }),
   });
 
   simulator.call('registerReviewer', pureCircuits.reviewerId(reviewerSecret));
+
+  for (const otherSecret of alsoRegister) {
+    simulator.call('registerReviewer', pureCircuits.reviewerId(otherSecret));
+  }
+
   simulator.call('openApplications');
   simulator.call('openReview');
 
@@ -148,6 +157,7 @@ describe('AEQUIRA L1 contract', () => {
       'adminAuthority',
       'phase',
       'revealedCounts',
+      'reviewerTree',
       'reviewers',
       'roundId',
       'scoreCommitments',
@@ -171,14 +181,87 @@ describe('AEQUIRA L1 contract', () => {
     );
   });
 
-  test('rejects an unregistered reviewer', () => {
+  test('rejects an unregistered reviewer, who cannot even build a membership path', () => {
     const context = setupReview();
     context.simulator.setPrivateState({ reviewerSecret: bytes(99) });
+
+    // An honest client stops here: the round's tree holds no leaf for this
+    // secret, so there is no path to prove membership with.
+    assert.throws(
+      () => context.simulator.call('commitScore', context.applicationId),
+      /not registered in the round/,
+    );
+  });
+
+  test('refuses a forged membership path that does not reconstruct the tree root', () => {
+    // A tampered client can skip the honest witness and hand the circuit any
+    // path it likes. This one carries the caller's own leaf, so it clears the
+    // binding assertion, but its siblings are wrong — `checkRoot` is what
+    // actually stops it.
+    const registeredSecret = bytes(33);
+    const unregisteredSecret = bytes(99);
+    const context = setupReview({
+      witnessOverrides: {
+        reviewerMerklePath: ({ ledger, privateState }) => [
+          privateState,
+          {
+            leaf: pureCircuits.reviewerId(unregisteredSecret),
+            path: ledger.reviewerTree.findPathForLeaf(pureCircuits.reviewerId(registeredSecret))
+              .path,
+          },
+        ],
+      },
+    });
+    context.simulator.setPrivateState({ reviewerSecret: unregisteredSecret });
 
     assert.throws(
       () => context.simulator.call('commitScore', context.applicationId),
       /Reviewer is not registered/,
     );
+  });
+
+  test('refuses a membership proof borrowed from another registered reviewer', () => {
+    // The attack the leaf binding exists to stop. Without it, anyone could
+    // present a real reviewer's leaf and path while deriving the nullifier from
+    // their own secret, and score the same application once per secret they
+    // invent.
+    const registeredSecret = bytes(33);
+    const attackerSecret = bytes(77);
+    const context = setupReview({
+      alsoRegister: [attackerSecret],
+      witnessOverrides: {
+        reviewerMerklePath: ({ ledger, privateState }) => [
+          privateState,
+          ledger.reviewerTree.findPathForLeaf(pureCircuits.reviewerId(registeredSecret)),
+        ],
+      },
+    });
+    context.simulator.setPrivateState({ reviewerSecret: attackerSecret });
+
+    assert.throws(
+      () => context.simulator.call('commitScore', context.applicationId),
+      /Membership proof is not for this reviewer/,
+    );
+  });
+
+  test('does not publish which reviewer scored the application', () => {
+    // The property this level is claiming. The roster is public, but the commit
+    // must not say which member of it acted.
+    const context = setupReview({ score: 73n });
+    const reviewerIdHex = Buffer.from(pureCircuits.reviewerId(context.reviewerSecret)).toString(
+      'hex',
+    );
+
+    context.simulator.call('commitScore', context.applicationId);
+    const publicState = context.simulator.getLedger();
+
+    const published = [
+      ...[...publicState.scoreCommitments],
+      ...[...publicState.scoreNullifiers],
+    ].map((value) => Buffer.from(value).toString('hex'));
+
+    assert.equal(published.length, 2);
+    assert.equal(published.includes(reviewerIdHex), false);
   });
 
   test('rejects scores above the rubric maximum', () => {

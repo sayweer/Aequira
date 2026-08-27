@@ -1,6 +1,7 @@
+import type { MerkleTreePath } from '@midnight-ntwrk/compact-runtime';
 import type { WitnessContext } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 
-import type { Ledger } from './managed/aequira/contract/index.js';
+import { pureCircuits, type Ledger } from './managed/aequira/contract/index.js';
 
 export type AequiraPrivateState = {
   readonly adminSecret: Uint8Array;
@@ -34,6 +35,32 @@ export const witnesses = {
     privateState,
     privateState.reviewerSecret,
   ],
+  /**
+   * Looks up this reviewer's own membership path in the public tree.
+   *
+   * The path is taken from the ledger rather than stored privately, so there is
+   * no local copy to go stale, and no hand-written Merkle code to get wrong.
+   * `commitScore` still asserts that the returned leaf is this reviewer's own
+   * pseudonym, so a path fetched for anyone else is refused by the circuit.
+   */
+  reviewerMerklePath: ({
+    ledger,
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [
+    AequiraPrivateState,
+    MerkleTreePath<Uint8Array>,
+  ] => {
+    const leaf = pureCircuits.reviewerId(privateState.reviewerSecret);
+    const path = ledger.reviewerTree.findPathForLeaf(leaf);
+
+    if (path === undefined) {
+      // Names no secret: the pseudonym is derived from one, and the round's
+      // roster is public anyway.
+      throw new Error('This reviewer is not registered in the round');
+    }
+
+    return [privateState, path];
+  },
   reviewScore: ({
     privateState,
   }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, bigint] => [

@@ -11,6 +11,12 @@ export enum Phase { SETUP = 0,
 export type Witnesses<PS> = {
   adminSecret(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
   reviewerSecret(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
+  reviewerMerklePath(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, { leaf: Uint8Array,
+                                                                                   path: { sibling: { field: bigint
+                                                                                                    },
+                                                                                           goes_left: boolean
+                                                                                         }[]
+                                                                                 }];
   reviewScore(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, bigint];
   reviewSalt(context: __compactRuntime.WitnessContext<Ledger, PS>): [PS, Uint8Array];
 }
@@ -87,6 +93,14 @@ export type Ledger = {
     size(): bigint;
     member(elem_0: Uint8Array): boolean;
     [Symbol.iterator](): Iterator<Uint8Array>
+  };
+  reviewerTree: {
+    isFull(): boolean;
+    checkRoot(rt_0: { field: bigint }): boolean;
+    root(): __compactRuntime.MerkleTreeDigest;
+    firstFree(): bigint;
+    pathForLeaf(index_0: bigint, leaf_0: Uint8Array): __compactRuntime.MerkleTreePath<Uint8Array>;
+    findPathForLeaf(leaf_0: Uint8Array): __compactRuntime.MerkleTreePath<Uint8Array> | undefined
   };
   scoreNullifiers: {
     isEmpty(): boolean;

@@ -17,9 +17,17 @@ export ledger roundId: Bytes<32>;
 
 export ledger adminAuthority: Bytes<32>;
 
-// L1 uses a public hashed allowlist. A private Merkle membership proof replaces
-// this in L2 because Set membership reveals which pseudonymous reviewer acts.
+// The public roster. It is queried only by `registerReviewer`, where the
+// administrator is naming the pseudonym anyway, so reading it discloses nothing
+// that registration did not already publish. It keeps registration idempotent
+// and lets an observer audit who is authorized.
 export ledger reviewers: Set<Bytes<32>>;
+
+// The same pseudonyms again, as a Merkle tree, so a reviewer can prove
+// membership at commit time without naming themselves. Depth 10 holds 1024
+// reviewers. Registration is SETUP-only and commits happen in REVIEW, so the
+// tree is frozen before any path is used and a single current root suffices.
+export ledger reviewerTree: MerkleTree<10, Bytes<32>>;
 
 export ledger scoreNullifiers: Set<Bytes<32>>;
 
@@ -41,6 +49,8 @@ constructor(initialRoundId: Bytes<32>, initialAdminSecret: Bytes<32>) {
 witness adminSecret(): Bytes<32>;
 
 witness reviewerSecret(): Bytes<32>;
+
+witness reviewerMerklePath(): MerkleTreePath<10, Bytes<32>>;
 
 witness reviewScore(): Uint<16>;
 
@@ -86,9 +96,13 @@ circuit assertAdmin(): [] {
 export circuit registerReviewer(id: Bytes<32>): [] {
   assert(phase == Phase.SETUP, "Reviewers can only be registered during setup");
   assertAdmin();
-  const publicReviewerId = disclose(id); // Safe for L1 only: public pseudonym; replaced by private Merkle membership in L2.
+  const publicReviewerId = disclose(id); // Safe: the administrator is publishing the roster on purpose; this is a one-way pseudonym, not a secret.
   assert(!reviewers.member(publicReviewerId), "Reviewer is already registered");
   reviewers.insert(publicReviewerId);
+  // insert (not insertHash) so the runtime hashes the leaf itself. That is the
+  // encoding findPathForLeaf searches by, and it pairs with the leaf-hashing
+  // merkleTreePathRoot used in commitScore.
+  reviewerTree.insert(publicReviewerId);
 }
 
 export circuit openApplications(): [] {
@@ -113,14 +127,24 @@ export circuit commitScore(applicationId: Bytes<32>): [] {
   assert(phase == Phase.REVIEW, "Scores can only be committed during review");
 
   const secret = reviewerSecret();
-  const id = reviewerId(secret);
   const score = reviewScore();
   const nullifier = scoreNullifier(roundId, applicationId, secret);
 
-  // L1 limitation: this disclosure identifies the acting allowlist pseudonym.
-  // L2 replaces it with a private Merkle membership proof.
-  const publicReviewerId = disclose(id);
-  assert(reviewers.member(publicReviewerId), "Reviewer is not registered");
+  // Membership is proven without being named. The path is a witness, and the
+  // only value that reaches the ledger is the resulting root, which is the same
+  // for every reviewer in the round.
+  //
+  // Binding the path's leaf to this caller's own pseudonym is what makes that
+  // safe. The witness chooses the leaf, so without this assertion a caller
+  // could present a registered reviewer's leaf and path while deriving the
+  // nullifier from their own secret, and score the same application again under
+  // as many secrets as they like.
+  const path = reviewerMerklePath();
+  assert(path.leaf == reviewerId(secret), "Membership proof is not for this reviewer");
+  const membershipRoot = merkleTreePathRoot<10, Bytes<32>>(path);
+  const publicMembershipRoot = disclose(membershipRoot); // Safe: this is the public tree root, identical for every reviewer, so it singles out no one.
+  assert(reviewerTree.checkRoot(publicMembershipRoot), "Reviewer is not registered");
+
   assert(score <= 100, "Score exceeds the rubric maximum");
   const publicNullifier = disclose(nullifier); // Safe: application-scoped, domain-separated one-way hash used for replay protection.
   assert(!scoreNullifiers.member(publicNullifier), "Reviewer already scored this application");
