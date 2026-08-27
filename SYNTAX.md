@@ -59,6 +59,10 @@ commitments.lookup(disclose(id)).insert(disclose(id));
 applicants.insertHash(disclose(id));
 ```
 
+`insertHash` compiles, but see "Merkle membership" below before choosing it over
+`insert` — they use different leaf encodings and only one of them is findable
+from TypeScript.
+
 `Set` and `Map` are unbounded ledger ADTs. `MerkleTree<depth, value_type>` is
 bounded, and the official reference currently permits depths from 2 through 32.
 Any iteration used in a circuit still needs a static bound; ledger ADT iterators
@@ -107,10 +111,11 @@ adjacent comment explaining why that exact value is safe to publish.
 AEQUIRA must never disclose applicant or reviewer secrets, private attributes,
 salts, nonces, Merkle paths, unrevealed scores, or conflict reasons.
 
-L1's hashed reviewer `Set` is a deliberate temporary limitation: querying
-membership requires disclosing which public pseudonym is accessed. This prevents
-raw-secret disclosure but remains linkable to the organizer. Private Merkle
-membership is required in L2 before claiming reviewer unlinkability.
+Querying a `Set` for membership requires disclosing which element is looked up,
+which is why `commitScore` no longer authorizes that way. The roster `Set`
+remains, but it is queried only by `registerReviewer`, where the administrator is
+naming the pseudonym anyway. Membership at commit time is proven against a
+`MerkleTree` instead — see "Merkle membership" below.
 
 ## Administrator authentication
 
@@ -157,10 +162,60 @@ with the default command. No supported statistics flag was identified in the
 current CLI help, so constraint metrics remain an explicit follow-up instead of
 being guessed.
 
+## Merkle membership
+
+Verified on 2026-08-27 by compiling and running the real circuits, not by
+reading documentation. The plan's placeholder `applicantMerkleVerify(...)` does
+not exist and must never be copied; the standard library provides these instead:
+
+```compact
+circuit merkleTreePathRoot<#n, T>(path: MerkleTreePath<n, T>): MerkleTreeDigest;
+circuit merkleTreePathRootNoLeafHash<#n>(path: MerkleTreePath<n, Bytes<32>>): MerkleTreeDigest;
+```
+
+Neither name appears on `docs.midnight.network`. They are documented in
+`midnightntwrk/midnight-expert` and used in production by `midnight-ledger`'s
+`zswap.compact` and `dust.compact`.
+
+AEQUIRA's working form:
+
+```compact
+export ledger reviewerTree: MerkleTree<10, Bytes<32>>;
+
+witness reviewerMerklePath(): MerkleTreePath<10, Bytes<32>>;
+
+// registerReviewer
+reviewerTree.insert(publicReviewerId);
+
+// commitScore
+const path = reviewerMerklePath();
+assert(path.leaf == reviewerId(secret), "Membership proof is not for this reviewer");
+const membershipRoot = merkleTreePathRoot<10, Bytes<32>>(path);
+assert(reviewerTree.checkRoot(disclose(membershipRoot)), "Reviewer is not registered");
+```
+
+**`insert` and `insertHash` are not interchangeable.** `insertHash(x)` stores `x`
+as the leaf digest and pairs with `merkleTreePathRootNoLeafHash`. The generated
+TypeScript `findPathForLeaf(leaf)` hashes its argument, so it returns `undefined`
+for a tree filled with `insertHash`, even though `firstFree()` and
+`pathForLeaf(index, leaf)` both show the leaf is there. Using `insert` plus
+`merkleTreePathRoot` keeps the write path, the lookup and the circuit on the same
+encoding. There is no `findPathForLeafHash`.
+
+The witness reads the path from the ledger — `WitnessContext` carries it — so no
+off-chain Merkle implementation is needed:
+
+```typescript
+const leaf = pureCircuits.reviewerId(privateState.reviewerSecret);
+const path = ledger.reviewerTree.findPathForLeaf(leaf);
+```
+
+**The leaf must be bound to the caller.** The witness chooses `path.leaf`, so
+without the `path.leaf == reviewerId(secret)` assertion any caller could present a
+registered member's leaf and path while deriving the nullifier from their own
+secret, defeating replay protection entirely.
+
 ## Still unresolved before the relevant circuit
 
-- The exact circuit-side method for verifying an off-chain Merkle path against a
-  stored root has not yet been proven. The plan's placeholder
-  `applicantMerkleVerify(...)` must not be copied as though it exists.
 - Constraint statistics need a supported compiler or artifact inspection method
   before the heavy `apply` circuit is accepted.

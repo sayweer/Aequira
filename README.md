@@ -13,7 +13,7 @@ and the tally is publicly verifiable once it is opened.
 | **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                              |
 | **Network**          | Midnight Preprod                                                                                     |
 | **Circuits**         | 6 (`registerReviewer`, `openApplications`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 124 (`pnpm test`)                                                                                    |
+| **Tests**            | 130 (`pnpm test`)                                                                                    |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -45,7 +45,7 @@ publicly verifiable tallies**, in its review-panel form:
 | -------------------------- | -------------------------------------------------------------- |
 | Sealed ballot              | `scoreCommitments`, a salted `persistentCommit` over the score |
 | One vote per voter         | `scoreNullifiers`, an application-scoped one-way nullifier     |
-| Voter authorization        | `reviewers`, a set of hashed reviewer pseudonyms               |
+| Voter authorization        | a Merkle membership proof against the `reviewerTree` roster    |
 | Publicly verifiable tally  | `scoreSums` and `revealedCounts`, filled during reveal         |
 | Ballot secrecy until close | the phase machine: scores open only in `REVEAL`                |
 
@@ -72,16 +72,19 @@ stateDiagram-v2
 
 | Circuit            | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                  |
 | ------------------ | ----------- | ------------------------- | ------------------------------------- | -------------------------------------------------- |
-| `registerReviewer` | `SETUP`     | `adminSecret`             | `reviewers`                           | rejects an already-registered pseudonym            |
+| `registerReviewer` | `SETUP`     | `adminSecret`             | `reviewers`, `reviewerTree`           | rejects an already-registered pseudonym            |
 | `openApplications` | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
 | `openReview`       | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
 | `openReveal`       | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                           |
-| `commitScore`      | `REVIEW`    | membership in `reviewers` | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`   |
+| `commitScore`      | `REVIEW`    | a Merkle membership proof | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`   |
 | `revealScore`      | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed from the set once opened |
 
-Three properties are worth reading the contract for
+Four properties are worth reading the contract for
 ([`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact)):
 
+- **The reviewer is authorized without being named.** `commitScore` reconstructs the
+  roster's Merkle root from a private path, so the ledger learns that some registered
+  reviewer scored, not which one. See [Reviewer unlinkability](#reviewer-unlinkability).
 - **The score is range-proven while hidden.** `commitScore` asserts `score <= 100`
   against a witness value and publishes only `persistentCommit(…score…, salt)`.
 - **The nullifier is scoped to one application.** It is derived from the round, the
@@ -109,6 +112,7 @@ carries an adjacent comment stating why publishing that value is safe.
 | `roundId` — public round metadata                       | `reviewerSecret` — identifies the reviewer   |
 | `adminAuthority` — a hash of the admin secret           | `reviewScore` — the score, until reveal      |
 | `reviewers` — hashed reviewer pseudonyms                | `reviewSalt` — hides the low-entropy score   |
+| `reviewerTree` — the same roster, as a Merkle tree      | `reviewerMerklePath` — proves membership     |
 | `scoreCommitments` — salted score commitments           |                                              |
 | `scoreNullifiers` — replay protection                   |                                              |
 | `scoreSums`, `revealedCounts` — the tally, after reveal |                                              |
@@ -145,20 +149,37 @@ the round and nothing else — there is no circuit that lets it touch a commitme
 - The score itself, before that reviewer chooses to reveal it.
 - The score salt, the reviewer secret, or the administrator secret.
 - Which wallet is behind a reviewer pseudonym.
+- **Which reviewer scored which application** — the roster is public, but the commit
+  proves membership without naming a member. See below.
 - Any score at all if the round never reaches the reveal phase.
 
-### Known limitation: reviewer activity is linkable
+### Reviewer unlinkability
 
-`commitScore` calls `disclose(reviewerId)` in order to check the hashed allowlist on
-chain. An observer therefore learns _which pseudonym scored which application_ — the
-scores stay sealed, but reviewer activity is linkable across a round.
+The roster is public, but which member of it scored a given application is not.
 
-This is a scoped trade-off, not an oversight: the allowlist is the simplest correct
-authorization primitive at this level, and replacing it with a private Merkle
-membership proof removes the disclosure without changing the commit–reveal flow. Until
-that lands, AEQUIRA does not claim reviewer unlinkability. The limitation is written
-into a comment on the `disclose` call itself, on the `reviewers` ledger declaration,
-and in [`SYNTAX.md`](SYNTAX.md).
+`registerReviewer` writes each pseudonym into both a `Set` — the auditable roster —
+and a `MerkleTree`. At commit time the reviewer does not name themselves: the witness
+supplies a Merkle path, and the circuit reconstructs the tree root from it. That root
+is the only value reaching the ledger, and it is identical for every reviewer in the
+round, so it authorizes the score without recording who cast it.
+
+What makes that safe is a single assertion binding the path to its holder:
+
+```compact
+assert(path.leaf == reviewerId(secret), "Membership proof is not for this reviewer");
+```
+
+The witness chooses the leaf. Without this line a caller could present a registered
+reviewer's leaf and path while deriving the nullifier from their own secret, and score
+the same application once per secret they invent — the replay protection would be
+bypassed entirely. Three contract tests pin this down: a proof borrowed from another
+registered reviewer, a forged path that does not reconstruct the root, and the absence
+of the pseudonym from the published state
+([`packages/contract/test/aequira.test.mjs`](packages/contract/test/aequira.test.mjs)).
+
+Registration is `SETUP`-only and commits happen in `REVIEW`, so the tree is frozen
+before any path is used and a single current root suffices — there is no need to
+retain historical roots.
 
 ### Observable privacy behaviour
 
@@ -183,7 +204,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 124 tests: 10 contract, 9 sdk, 69 ui, 36 cli
+pnpm test            # 130 tests: 14 contract, 16 sdk, 63 ui, 37 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -219,7 +240,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 124 tests, no proof server needed
+pnpm test                   # 130 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
