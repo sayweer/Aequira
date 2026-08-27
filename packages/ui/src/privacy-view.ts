@@ -59,6 +59,13 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
       value: 'held in this browser',
     },
     {
+      detail:
+        'A one-way hash of the reviewer secret. The organizer registered it during setup, so it is on the public roster — but the commit proves membership from a Merkle path instead of naming it, so it does not appear in this transaction.',
+      label: 'Reviewer pseudonym',
+      scope: 'local',
+      value: 'held in this browser',
+    },
+    {
       detail: 'Authorizes phase transitions. Only its hash reached the ledger, as adminAuthority.',
       label: 'Administrator secret',
       scope: 'local',
@@ -98,6 +105,13 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
       label: 'Replay nullifier',
       scope: 'public',
       value: input.nullifierHex ?? NOT_YET,
+    },
+    {
+      detail:
+        'The commit proves the reviewer is on the roster by reconstructing this root from a private Merkle path. The root is the same for every reviewer, so it authorizes the score without recording which reviewer cast it.',
+      label: 'Reviewer membership',
+      scope: 'public',
+      value: 'root matches; the acting reviewer is not recorded',
     },
     {
       detail:

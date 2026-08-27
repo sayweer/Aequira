@@ -79,6 +79,8 @@ test('explains each contract assertion a circuit call can fail on', () => {
     ['Only the round administrator can perform this action', /not the round administrator/],
     ['Reviewer is already registered', /already registered for this round/],
     ['Reviewer is not registered', /pseudonym is not registered/],
+    ['Membership proof is not for this reviewer', /does not belong to this browser/],
+    ['This reviewer is not registered in the round', /no membership proof can be built/],
     ['Reviewer already scored this application', /replay nullifier/],
     ['Reviewers can only be registered during setup', /while the round is in setup/],
     ['Scores can only be committed during review', /during the review phase/],

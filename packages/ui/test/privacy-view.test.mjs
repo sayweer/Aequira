@@ -53,7 +53,7 @@ test('scopes each value to the side it belongs on', () => {
 
   assert.deepEqual(
     disclosure.local.map((row) => row.label),
-    ['Score', 'Score salt', 'Reviewer secret', 'Administrator secret'],
+    ['Score', 'Score salt', 'Reviewer secret', 'Reviewer pseudonym', 'Administrator secret'],
   );
   assert.deepEqual(
     disclosure.public.map((row) => row.label),
@@ -63,6 +63,7 @@ test('scopes each value to the side it belongs on', () => {
       'Application ID',
       'Score commitment',
       'Replay nullifier',
+      'Reviewer membership',
       'Revealed score sum',
       'Revealed count',
     ],
@@ -74,10 +75,27 @@ test('scopes each value to the side it belongs on', () => {
 test('never places the salt or a secret value in a row', () => {
   const disclosure = buildRoundDisclosure(committed());
 
-  for (const label of ['Score salt', 'Reviewer secret', 'Administrator secret']) {
+  for (const label of [
+    'Score salt',
+    'Reviewer secret',
+    'Reviewer pseudonym',
+    'Administrator secret',
+  ]) {
     const row = disclosure.local.find((entry) => entry.label === label);
     assert.equal(row.value, 'held in this browser');
   }
+});
+
+test('does not record which reviewer cast the score', () => {
+  // The pseudonym is on the public roster, but the commit proves membership
+  // from a Merkle path rather than naming it, so it must not turn up in the
+  // transaction an observer reads.
+  const disclosure = buildRoundDisclosure(committed());
+  const blob = serializePublicLedger(disclosure);
+  const membership = disclosure.public.find((row) => row.label === 'Reviewer membership');
+
+  assert.equal(membership.value, 'root matches; the acting reviewer is not recorded');
+  assert.ok(!blob.includes('pseudonym'), `the public view named the reviewer: ${blob}`);
 });
 
 test('reports the pre-commit state without inventing values', () => {

@@ -216,6 +216,16 @@ const CONTRACT_ASSERTION_MESSAGES: readonly (readonly [string, string])[] = [
     'That reviewer pseudonym is already registered for this round.',
   ],
   [
+    'membership proof is not for this reviewer',
+    'The membership proof does not belong to this browser’s reviewer pseudonym. Rejoin the round so the proof is rebuilt from the current roster.',
+  ],
+  // Ahead of the bare 'reviewer is not registered' below, which this message
+  // also contains: the first match wins, and this one says more.
+  [
+    'not registered in the round',
+    'This browser’s reviewer pseudonym is not in the round’s reviewer tree, so no membership proof can be built. Ask the organizer to register it during setup.',
+  ],
+  [
     'reviewer is not registered',
     'This browser’s reviewer pseudonym is not registered for this round. Ask the organizer to register it during setup.',
   ],
