@@ -17,24 +17,46 @@ import { witnesses } from '../dist/witnesses.js';
 setNetworkId('undeployed');
 
 const bytes = (value) => new Uint8Array(32).fill(value);
+const hex = (value) => Buffer.from(value).toString('hex');
 
 class AequiraSimulator {
   // `witnessOverrides` stands in for a tampered client: the circuit must hold
   // even when the witness returns something the honest implementation never
   // would.
-  constructor({ roundId, adminSecret, reviewerSecret, score, scoreSalt, witnessOverrides = {} }) {
+  constructor({
+    roundId,
+    adminSecret,
+    reviewerSecret,
+    score,
+    scoreSalt,
+    applicantSecret = bytes(66),
+    applicantIncomeBand = 0n,
+    applicantGpaScaled = 0n,
+    applicantRegionCode = 0n,
+    applicantSalt = bytes(88),
+    maxIncomeBand = 3n,
+    minGpaScaled = 300n,
+    witnessOverrides = {},
+  }) {
     this.contract = new Contract({ ...witnesses, ...witnessOverrides });
     const privateState = {
       adminSecret,
       reviewerSecret,
       score,
       scoreSalt,
+      applicantSecret,
+      applicantIncomeBand,
+      applicantGpaScaled,
+      applicantRegionCode,
+      applicantSalt,
     };
     const { currentPrivateState, currentContractState, currentZswapLocalState } =
       this.contract.initialState(
         createConstructorContext(privateState, '0'.repeat(64)),
         roundId,
         adminSecret,
+        maxIncomeBand,
+        minGpaScaled,
       );
 
     this.context = {
@@ -155,6 +177,11 @@ describe('AEQUIRA L1 contract', () => {
     assert.equal(simulator.getPrivateState().score, 87n);
     assert.deepEqual(Object.keys(publicState).sort(), [
       'adminAuthority',
+      'applicantTree',
+      'applications',
+      'applyNullifiers',
+      'maxIncomeBand',
+      'minGpaScaled',
       'phase',
       'revealedCounts',
       'reviewerTree',
@@ -431,5 +458,242 @@ describe('AEQUIRA L1 contract', () => {
     assert.equal(ledger.scoreSums.lookup(applicationB).read(), scoreB);
     assert.equal(ledger.revealedCounts.lookup(applicationA).read(), 1n);
     assert.equal(ledger.revealedCounts.lookup(applicationB).read(), 1n);
+  });
+  // The applicant half of a round. The institution verifies the attributes and
+  // enrolls the commitment they open to; the applicant keeps the secret, so the
+  // leaf on chain is the only thing the institution ever holds about them.
+  const APPLICANT_INCOME_BAND = 2n;
+  const APPLICANT_GPA_SCALED = 350n;
+  const APPLICANT_REGION_CODE = 7n;
+
+  const enroll = (simulator, { incomeBand, gpaScaled, regionCode, secret, salt }) => {
+    simulator.call(
+      'registerApplicant',
+      pureCircuits.applicantLeaf(incomeBand, gpaScaled, regionCode, secret, salt),
+    );
+  };
+
+  const setupApply = ({
+    incomeBand = APPLICANT_INCOME_BAND,
+    gpaScaled = APPLICANT_GPA_SCALED,
+    regionCode = APPLICANT_REGION_CODE,
+    enrolled = true,
+    alsoEnroll = [],
+    witnessOverrides,
+  } = {}) => {
+    const roundId = bytes(11);
+    const applicantSecret = bytes(66);
+    const applicantSalt = bytes(88);
+    const nonce = bytes(99);
+    const simulator = new AequiraSimulator({
+      roundId,
+      adminSecret: bytes(22),
+      reviewerSecret: bytes(33),
+      score: 0n,
+      scoreSalt: bytes(44),
+      applicantSecret,
+      applicantIncomeBand: incomeBand,
+      applicantGpaScaled: gpaScaled,
+      applicantRegionCode: regionCode,
+      applicantSalt,
+      ...(witnessOverrides === undefined ? {} : { witnessOverrides }),
+    });
+
+    if (enrolled) {
+      enroll(simulator, {
+        incomeBand,
+        gpaScaled,
+        regionCode,
+        secret: applicantSecret,
+        salt: applicantSalt,
+      });
+    }
+
+    for (const other of alsoEnroll) {
+      enroll(simulator, other);
+    }
+
+    simulator.call('openApplications');
+
+    return { simulator, roundId, applicantSecret, applicantSalt, nonce };
+  };
+
+  test('accepts an eligible applicant and publishes only the two derived values', () => {
+    const { simulator, roundId, applicantSecret, nonce } = setupApply();
+
+    simulator.call('apply', nonce);
+    const publicState = simulator.getLedger();
+
+    assert.equal(
+      publicState.applyNullifiers.member(pureCircuits.applyNullifier(roundId, applicantSecret)),
+      true,
+    );
+    assert.equal(
+      publicState.applications.member(
+        pureCircuits.applicationPseudonym(roundId, applicantSecret, nonce),
+      ),
+      true,
+    );
+    // The rules the round announced, still exactly as deployed.
+    assert.equal(publicState.maxIncomeBand, 3n);
+    assert.equal(publicState.minGpaScaled, 300n);
+  });
+
+  test('rejects applications outside the application phase', () => {
+    const context = setupApply();
+    context.simulator.call('openReview');
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /Applications can only be submitted while applications are open/,
+    );
+  });
+
+  test('refuses an applicant the institution never enrolled', () => {
+    const context = setupApply({ enrolled: false });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /This applicant is not enrolled in the round/,
+    );
+  });
+
+  test('refuses an enrolled applicant whose income band is above the threshold', () => {
+    // Enrolled with the real figure, so the path resolves and the enrollment
+    // opening succeeds: it is the threshold alone that stops the application.
+    const context = setupApply({ incomeBand: 9n });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /Income band is above the eligibility threshold/,
+    );
+  });
+
+  test('refuses an enrolled applicant whose grade average is below the threshold', () => {
+    const context = setupApply({ gpaScaled: 250n });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /Grade average is below the eligibility threshold/,
+    );
+  });
+
+  test('refuses an enrollment proof borrowed from another applicant', () => {
+    // Without the leaf binding, someone who was never enrolled could hand the
+    // circuit a real applicant's path while nullifying under a secret of their
+    // own, and apply once per secret they invent.
+    const other = {
+      incomeBand: 1n,
+      gpaScaled: 400n,
+      regionCode: 5n,
+      secret: bytes(77),
+      salt: bytes(78),
+    };
+    const context = setupApply({
+      enrolled: false,
+      alsoEnroll: [other],
+      witnessOverrides: {
+        applicantMerklePath: ({ ledger, privateState }) => [
+          privateState,
+          ledger.applicantTree.findPathForLeaf(
+            pureCircuits.applicantLeaf(
+              other.incomeBand,
+              other.gpaScaled,
+              other.regionCode,
+              other.secret,
+              other.salt,
+            ),
+          ),
+        ],
+      },
+    });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /Enrollment proof is not for this applicant/,
+    );
+  });
+
+  test('publishes nothing that links an application to the enrolled commitment', () => {
+    // The enrollment leaf is public: the institution put it there. So the
+    // property under test is not that the leaf is hidden, but that neither
+    // value the application publishes can be matched back to it. Everything
+    // written is enumerated, so a future extra write cannot slip past.
+    const context = setupApply();
+    const leafHex = hex(
+      pureCircuits.applicantLeaf(
+        APPLICANT_INCOME_BAND,
+        APPLICANT_GPA_SCALED,
+        APPLICANT_REGION_CODE,
+        context.applicantSecret,
+        context.applicantSalt,
+      ),
+    );
+    const applicantIdHex = hex(pureCircuits.applicantId(context.applicantSecret));
+
+    context.simulator.call('apply', context.nonce);
+    const publicState = context.simulator.getLedger();
+    const published = [...[...publicState.applyNullifiers], ...[...publicState.applications]].map(
+      hex,
+    );
+
+    assert.deepEqual(
+      [...published].sort(),
+      [
+        hex(pureCircuits.applyNullifier(context.roundId, context.applicantSecret)),
+        hex(
+          pureCircuits.applicationPseudonym(
+            context.roundId,
+            context.applicantSecret,
+            context.nonce,
+          ),
+        ),
+      ].sort(),
+    );
+    assert.equal(published.includes(leafHex), false);
+    assert.equal(published.includes(applicantIdHex), false);
+  });
+
+  test('rejects a second application from the same applicant', () => {
+    const context = setupApply();
+    context.simulator.call('apply', context.nonce);
+
+    // A fresh nonce changes the pseudonym but not the nullifier, which is what
+    // one-application-per-person rests on.
+    assert.throws(
+      () => context.simulator.call('apply', bytes(100)),
+      /This applicant already applied to the round/,
+    );
+  });
+
+  test('enrolls applicants only during setup and only for the administrator', () => {
+    const applicantSecret = bytes(66);
+    const applicantSalt = bytes(88);
+    const leaf = pureCircuits.applicantLeaf(
+      APPLICANT_INCOME_BAND,
+      APPLICANT_GPA_SCALED,
+      APPLICANT_REGION_CODE,
+      applicantSecret,
+      applicantSalt,
+    );
+    const adminSecret = bytes(22);
+    const simulator = new AequiraSimulator({
+      roundId: bytes(11),
+      adminSecret,
+      reviewerSecret: bytes(33),
+      score: 0n,
+      scoreSalt: bytes(44),
+    });
+
+    simulator.setPrivateState({ adminSecret: bytes(98) });
+    assert.throws(() => simulator.call('registerApplicant', leaf), /Only the round administrator/);
+
+    simulator.setPrivateState({ adminSecret });
+    simulator.call('registerApplicant', leaf);
+    simulator.call('openApplications');
+    assert.throws(
+      () => simulator.call('registerApplicant', leaf),
+      /Applicants can only be enrolled during setup/,
+    );
   });
 });

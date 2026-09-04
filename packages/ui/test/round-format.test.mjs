@@ -44,6 +44,8 @@ const createCounterMap = (entries) => ({
 
 const createLedger = (overrides = {}) => ({
   adminAuthority: hexToBytes('cd'.repeat(32)),
+  maxIncomeBand: 3n,
+  minGpaScaled: 300n,
   phase: 2,
   revealedCounts: createCounterMap({}),
   reviewers: createSet([]),
@@ -96,6 +98,13 @@ test('enumerates the ledger sets and counts nullifiers', () => {
   assert.equal(view.nullifierCount, 3);
   assert.equal(view.phaseLabel, 'Review');
   assert.equal(view.roundIdHex, 'ef'.repeat(32));
+});
+
+test('carries the eligibility rules the round announced', () => {
+  const view = toRoundView(createLedger({ maxIncomeBand: 4n, minGpaScaled: 275n }), []);
+
+  assert.equal(view.maxIncomeBand, 4);
+  assert.equal(view.minGpaScaled, 275);
 });
 
 test('reads a tally for an application that has revealed scores', () => {

@@ -37,13 +37,48 @@ export ledger scoreSums: Map<Bytes<32>, Counter>;
 
 export ledger revealedCounts: Map<Bytes<32>, Counter>;
 
-constructor(initialRoundId: Bytes<32>, initialAdminSecret: Bytes<32>) {
+// The eligibility rules. They are public on purpose: an observer has to be able
+// to check the round against the criteria it announced, and publishing a
+// threshold reveals nothing about the applicants measured against it.
+export ledger maxIncomeBand: Uint<8>;
+
+// Scaled by 100 so a grade average stays an integer; there is no division.
+export ledger minGpaScaled: Uint<16>;
+
+// The enrollment commitments the institution computed, as a Merkle tree, so an
+// applicant can prove enrollment and eligibility without naming themselves.
+// Depth 10 holds 1024 applicants. Enrollment is SETUP-only and applications
+// happen in APPLY, so the tree is frozen before any path is used and a single
+// current root suffices.
+//
+// There is no public Set beside it as there is for reviewers: nothing needs to
+// query enrollment by leaf, and enrolling the same commitment twice is
+// harmless because the applicant still has exactly one apply nullifier.
+export ledger applicantTree: MerkleTree<10, Bytes<32>>;
+
+export ledger applyNullifiers: Set<Bytes<32>>;
+
+// The pseudonyms of the accepted applications. `commitScore` deliberately does
+// not check membership here: proving that a score belongs to a listed
+// application would mean disclosing which application is being scored, which is
+// exactly what the sealed review phase exists to hide.
+export ledger applications: Set<Bytes<32>>;
+
+constructor(initialRoundId: Bytes<32>,
+            initialAdminSecret: Bytes<32>,
+            initialMaxIncomeBand: Uint<8>,
+            initialMinGpaScaled: Uint<16>
+            ) {
   const publicRoundId = disclose(initialRoundId); // Safe: the round identifier is intentionally public metadata.
   const publicAdminAuthority = disclose(adminId(initialRoundId, initialAdminSecret)); // Safe: domain-separated one-way hash; the admin secret remains private.
+  const publicMaxIncomeBand = disclose(initialMaxIncomeBand); // Safe: an eligibility rule, published before applications open so the round can be audited against it.
+  const publicMinGpaScaled = disclose(initialMinGpaScaled); // Safe: an eligibility rule, published before applications open so the round can be audited against it.
 
   phase = Phase.SETUP;
   roundId = publicRoundId;
   adminAuthority = publicAdminAuthority;
+  maxIncomeBand = publicMaxIncomeBand;
+  minGpaScaled = publicMinGpaScaled;
 }
 
 witness adminSecret(): Bytes<32>;
@@ -55,6 +90,20 @@ witness reviewerMerklePath(): MerkleTreePath<10, Bytes<32>>;
 witness reviewScore(): Uint<16>;
 
 witness reviewSalt(): Bytes<32>;
+
+witness applicantSecret(): Bytes<32>;
+
+// Declared one attribute per witness rather than as a single tuple-returning
+// witness, which the language version in use has not been verified to support.
+witness applicantIncomeBand(): Uint<8>;
+
+witness applicantGpaScaled(): Uint<16>;
+
+witness applicantRegionCode(): Uint<8>;
+
+witness applicantSalt(): Bytes<32>;
+
+witness applicantMerklePath(): MerkleTreePath<10, Bytes<32>>;
 
 export circuit adminId(activeRoundId: Bytes<32>, secret: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<3, Bytes<32>>>([pad(32, "aequira:admin:v1"), activeRoundId, secret]);
@@ -87,6 +136,51 @@ export circuit scoreCommitment(
            );
 }
 
+export circuit applicantId(secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "aequira:applicant:v1"), secret]);
+}
+
+// The enrollment commitment. The institution computes it from the attributes it
+// verified plus the applicant's `applicantId`, which is all the applicant ever
+// hands over: the secret behind it never leaves their device, which is what
+// stops the institution from recognizing the application it later sees.
+export circuit applicantLeaf(
+                 incomeBand: Uint<8>,
+                 gpaScaled: Uint<16>,
+                 regionCode: Uint<8>,
+                 secret: Bytes<32>,
+                 salt: Bytes<32>
+                 ): Bytes<32> {
+  return persistentCommit<Vector<5, Bytes<32>>>(
+           [pad(32, "aequira:applicant-leaf:v1"),
+            incomeBand as Bytes<32>,
+            gpaScaled as Bytes<32>,
+            regionCode as Bytes<32>,
+            applicantId(secret)],
+           salt
+           );
+}
+
+export circuit applyNullifier(activeRoundId: Bytes<32>, secret: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>(
+           [pad(32, "aequira:apply-nullifier:v1"), activeRoundId, secret]
+           );
+}
+
+// The pseudonym the panel scores. The nonce is the commitment randomness and
+// the applicant keeps it, so the same value can be reproduced later to claim an
+// award without anyone else being able to derive it.
+export circuit applicationPseudonym(
+                 activeRoundId: Bytes<32>,
+                 secret: Bytes<32>,
+                 nonce: Bytes<32>
+                 ): Bytes<32> {
+  return persistentCommit<Vector<3, Bytes<32>>>(
+           [pad(32, "aequira:application:v1"), activeRoundId, secret],
+           nonce
+           );
+}
+
 circuit assertAdmin(): [] {
   assert(adminAuthority == adminId(roundId, adminSecret()),
          "Only the round administrator can perform this action"
@@ -105,6 +199,16 @@ export circuit registerReviewer(id: Bytes<32>): [] {
   reviewerTree.insert(publicReviewerId);
 }
 
+export circuit registerApplicant(leaf: Bytes<32>): [] {
+  assert(phase == Phase.SETUP, "Applicants can only be enrolled during setup");
+  assertAdmin();
+  const publicLeaf = disclose(leaf); // Safe: a salted commitment the administrator computed itself; the income band, grade average, region and salt inside it stay hidden.
+  // insert (not insertHash) so the runtime hashes the leaf itself. That is the
+  // encoding findPathForLeaf searches by, and it pairs with the leaf-hashing
+  // merkleTreePathRoot used in apply.
+  applicantTree.insert(publicLeaf);
+}
+
 export circuit openApplications(): [] {
   assert(phase == Phase.SETUP, "Applications can only open after setup");
   assertAdmin();
@@ -121,6 +225,47 @@ export circuit openReveal(): [] {
   assert(phase == Phase.REVIEW, "Reveal can only open after review");
   assertAdmin();
   phase = Phase.REVEAL;
+}
+
+export circuit apply(nonce: Bytes<32>): [] {
+  assert(phase == Phase.APPLY, "Applications can only be submitted while applications are open");
+
+  const secret = applicantSecret();
+  const incomeBand = applicantIncomeBand();
+  const gpaScaled = applicantGpaScaled();
+  const regionCode = applicantRegionCode();
+  const salt = applicantSalt();
+
+  // The same membership shape as commitScore: the path is a witness and the
+  // only value that reaches the ledger is the root, which is identical for
+  // every enrolled applicant.
+  //
+  // Recomputing the leaf from this caller's own witnesses does two jobs at
+  // once. It opens the institution's commitment, so the attributes compared
+  // against the thresholds below are the ones that were actually verified at
+  // enrollment rather than numbers the client invented. And it binds the path
+  // to this caller, so nobody can present someone else's enrollment while
+  // nullifying under a secret of their own.
+  const path = applicantMerklePath();
+  assert(path.leaf == applicantLeaf(incomeBand, gpaScaled, regionCode, secret, salt),
+         "Enrollment proof is not for this applicant"
+         );
+  const membershipRoot = merkleTreePathRoot<10, Bytes<32>>(path);
+  const publicMembershipRoot = disclose(membershipRoot); // Safe: this is the public tree root, identical for every enrolled applicant, so it singles out no one.
+  assert(applicantTree.checkRoot(publicMembershipRoot), "Applicant is not enrolled in the round");
+
+  // The thresholds are public and the attributes are not. Only the verdict
+  // leaves the circuit, and only as the fact that a proof was accepted at all.
+  assert(incomeBand <= maxIncomeBand, "Income band is above the eligibility threshold");
+  assert(gpaScaled >= minGpaScaled, "Grade average is below the eligibility threshold");
+
+  const publicNullifier = disclose(applyNullifier(roundId, secret)); // Safe: round-scoped, domain-separated one-way hash used for replay protection.
+  assert(!applyNullifiers.member(publicNullifier), "This applicant already applied to the round");
+
+  const publicApplicationId = disclose(applicationPseudonym(roundId, secret, nonce)); // Safe: a commitment under a nonce only the applicant holds; it names no one, and even the enrolling institution cannot match it to a leaf.
+
+  applyNullifiers.insert(publicNullifier);
+  applications.insert(publicApplicationId);
 }
 
 export circuit commitScore(applicationId: Bytes<32>): [] {

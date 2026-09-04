@@ -17,6 +17,11 @@ const validPrivateState = () => ({
   reviewerSecret: bytes(),
   score: 50n,
   scoreSalt: bytes(),
+  applicantSecret: bytes(),
+  applicantIncomeBand: 2n,
+  applicantGpaScaled: 350n,
+  applicantRegionCode: 7n,
+  applicantSalt: bytes(),
 });
 
 describe('AEQUIRA SDK input validation', () => {
@@ -43,6 +48,35 @@ describe('AEQUIRA SDK input validation', () => {
           score: 101n,
         }),
       /score must be between 0 and 100/,
+    );
+  });
+
+  test('rejects applicant attributes wider than the circuit accepts', () => {
+    // The witnesses are Uint<8>, Uint<16> and Uint<8>. Catching an overflow here
+    // fails the call before a proof is attempted.
+    assert.throws(
+      () =>
+        validateAequiraPrivateState({
+          ...validPrivateState(),
+          applicantIncomeBand: 256n,
+        }),
+      /applicantIncomeBand must be between 0 and 255/,
+    );
+    assert.throws(
+      () =>
+        validateAequiraPrivateState({
+          ...validPrivateState(),
+          applicantGpaScaled: 65536n,
+        }),
+      /applicantGpaScaled must be between 0 and 65535/,
+    );
+    assert.throws(
+      () =>
+        validateAequiraPrivateState({
+          ...validPrivateState(),
+          applicantSalt: bytes(31),
+        }),
+      /applicantSalt must contain exactly 32 bytes/,
     );
   });
 

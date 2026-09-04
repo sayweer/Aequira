@@ -29,7 +29,12 @@ import { withDeploymentStage } from './deployment-errors.js';
 import { deployNewAequira } from './deployment.js';
 import type { ProofMode } from './proof-mode.js';
 import { bytesToHex, hexToBytes, toRoundView, type RoundView } from './round-format.js';
-import { parseApplicationId, parseContractAddressInput, parseReviewerId } from './round-inputs.js';
+import {
+  parseApplicationId,
+  parseContractAddressInput,
+  parseReviewerId,
+  type EligibilityThresholds,
+} from './round-inputs.js';
 
 export type RoundSession = {
   readonly address: ContractAddress;
@@ -74,8 +79,9 @@ const toRoundSession = async (
 export const deployRound = async (
   connectedApi: ConnectedAPI,
   privateStatePassword: string,
+  thresholds: EligibilityThresholds,
 ): Promise<RoundSession> => {
-  const deployment = await deployNewAequira(connectedApi, privateStatePassword);
+  const deployment = await deployNewAequira(connectedApi, privateStatePassword, thresholds);
 
   try {
     return await toRoundSession(deployment.session, deployment.address, deployment.contract);
@@ -184,12 +190,12 @@ const buildOpening = async (
         deriveScoreNullifier(session.roundId, applicationId, reviewerSecret),
       ),
     },
-    privateState: createAequiraPrivateState(
-      Uint8Array.from(current.adminSecret),
+    privateState: createAequiraPrivateState({
+      ...current,
       reviewerSecret,
-      BigInt(input.score),
-      salt,
-    ),
+      score: BigInt(input.score),
+      scoreSalt: salt,
+    }),
   };
 };
 

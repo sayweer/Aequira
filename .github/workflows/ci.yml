@@ -49,7 +49,7 @@ jobs:
       - name: Verify the generated circuits and keys
         run: |
           cd "$RUNNER_TEMP/managed-ci"
-          for circuit in commitScore openApplications openReveal openReview registerReviewer revealScore; do
+          for circuit in apply commitScore openApplications openReveal openReview registerApplicant registerReviewer revealScore; do
             test -s "keys/$circuit.prover"
             test -s "keys/$circuit.verifier"
             test -s "zkir/$circuit.zkir"

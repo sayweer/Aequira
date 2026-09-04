@@ -12,13 +12,15 @@ export const ContractPanel = ({ round }: ContractPanelProps) => {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [addressInput, setAddressInput] = useState(round.rememberedAddress ?? '');
+  const [maxIncomeBand, setMaxIncomeBand] = useState('');
+  const [minGpaScaled, setMinGpaScaled] = useState('');
 
   const opening = round.busy === 'deploy' || round.busy === 'join';
   const isOpen = round.address !== null;
 
   const submit = async (action: 'deploy' | 'join') => {
     if (action === 'deploy') {
-      await round.deploy(password, confirmation);
+      await round.deploy(password, confirmation, maxIncomeBand, minGpaScaled);
     } else {
       await round.join(password, confirmation, addressInput);
     }
@@ -82,6 +84,36 @@ export const ContractPanel = ({ round }: ContractPanelProps) => {
                 onChange={(event) => setConfirmation(event.target.value)}
                 type="password"
                 value={confirmation}
+              />
+            </label>
+          </div>
+
+          <p className="deployment-copy">
+            The eligibility rules are published with the round and cannot change once it is open.
+            Applicants prove they clear them without revealing the figures behind the proof.
+          </p>
+
+          <div className="password-grid">
+            <label>
+              <span>Maximum income band (0-255)</span>
+              <input
+                autoComplete="off"
+                disabled={opening}
+                inputMode="numeric"
+                onChange={(event) => setMaxIncomeBand(event.target.value)}
+                type="text"
+                value={maxIncomeBand}
+              />
+            </label>
+            <label>
+              <span>Minimum grade average, x100 (320 = 3.20)</span>
+              <input
+                autoComplete="off"
+                disabled={opening}
+                inputMode="numeric"
+                onChange={(event) => setMinGpaScaled(event.target.value)}
+                type="text"
+                value={minGpaScaled}
               />
             </label>
           </div>

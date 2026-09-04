@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   parseApplicationId,
   parseContractAddressInput,
+  parseEligibilityThresholds,
   parseReviewerId,
   parseScore,
 } from '../.test-build/round-inputs.js';
@@ -70,4 +71,25 @@ test('never echoes the rejected value, because these fields also carry scores', 
       }
     }
   }
+});
+
+test('parses the eligibility rules as the constructor takes them', () => {
+  assert.deepEqual(parseEligibilityThresholds(' 3 ', '320'), {
+    maxIncomeBand: 3n,
+    minGpaScaled: 320n,
+  });
+  assert.deepEqual(parseEligibilityThresholds('0', '0'), {
+    maxIncomeBand: 0n,
+    minGpaScaled: 0n,
+  });
+});
+
+test('refuses eligibility rules the contract could not store', () => {
+  assert.throws(
+    () => parseEligibilityThresholds('256', '320'),
+    /maximum income band must be a whole number between 0 and 255/i,
+  );
+  assert.throws(() => parseEligibilityThresholds('3', '65536'), /between 0 and 65535/);
+  assert.throws(() => parseEligibilityThresholds('', '320'), /Enter the maximum income band/);
+  assert.throws(() => parseEligibilityThresholds('3', '3.2'), /whole number/);
 });

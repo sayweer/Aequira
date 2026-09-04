@@ -71,6 +71,48 @@ export const parseScore = (value: string): number => {
   return score;
 };
 
+/**
+ * The round's eligibility rules, as the constructor takes them.
+ *
+ * The grade average is carried scaled by 100 rather than as a decimal, because
+ * that is how the contract stores and compares it — there is no division inside
+ * a circuit, and rounding a threshold silently would change who is eligible.
+ */
+export type EligibilityThresholds = {
+  readonly maxIncomeBand: bigint;
+  readonly minGpaScaled: bigint;
+};
+
+export const MAX_INCOME_BAND = 255;
+export const MAX_GPA_SCALED = 65535;
+
+const parseThreshold = (value: string, label: string, maximum: number): bigint => {
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    throw new InputError(`Enter ${label}.`);
+  }
+  if (!/^[0-9]{1,5}$/.test(trimmed) || Number(trimmed) > maximum) {
+    throw new InputError(
+      `${label.charAt(0).toUpperCase()}${label.slice(1)} must be a whole number between 0 and ${maximum}.`,
+    );
+  }
+
+  return BigInt(trimmed);
+};
+
+export const parseEligibilityThresholds = (
+  maxIncomeBand: string,
+  minGpaScaled: string,
+): EligibilityThresholds => ({
+  maxIncomeBand: parseThreshold(maxIncomeBand, 'the maximum income band', MAX_INCOME_BAND),
+  minGpaScaled: parseThreshold(
+    minGpaScaled,
+    'the minimum grade average, scaled by 100',
+    MAX_GPA_SCALED,
+  ),
+});
+
 export const parseContractAddressInput = (value: string): string => {
   const trimmed = value.trim();
 

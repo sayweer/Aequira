@@ -63,6 +63,22 @@ const readDirectory = async (directory) => {
   return Buffer.concat(contents);
 };
 
+// Every command reads a complete private state before it calls a circuit, so
+// each fixture below states only the values its own test cares about and takes
+// the rest — including the whole applicant half of the round — from here.
+const privateStateFixture = (overrides = {}) => ({
+  adminSecret: new Uint8Array(32).fill(1),
+  reviewerSecret: new Uint8Array(32).fill(2),
+  score: 0n,
+  scoreSalt: new Uint8Array(32).fill(3),
+  applicantSecret: new Uint8Array(32).fill(4),
+  applicantIncomeBand: 2n,
+  applicantGpaScaled: 350n,
+  applicantRegionCode: 7n,
+  applicantSalt: new Uint8Array(32).fill(5),
+  ...overrides,
+});
+
 describe('AEQUIRA CLI configuration', () => {
   test('loads the official preprod endpoints by default', () => {
     const config = loadCliConfig({ environment: {} });
@@ -121,9 +137,35 @@ describe('AEQUIRA CLI configuration', () => {
   test('requires public deploy and join identifiers', () => {
     assert.throws(() => parseCliArguments(['deploy']), /requires --round-id/);
     assert.throws(() => parseCliArguments(['join']), /requires --contract-address/);
-    assert.equal(
-      parseCliArguments(['deploy', '--round-id', 'ab'.repeat(32)]).roundId,
-      'ab'.repeat(32),
+    assert.throws(
+      () => parseCliArguments(['deploy', '--round-id', 'ab'.repeat(32)]),
+      /requires --max-income-band/,
+    );
+    assert.throws(
+      () => parseCliArguments(['deploy', '--round-id', 'ab'.repeat(32), '--max-income-band', '3']),
+      /requires --min-gpa-scaled/,
+    );
+    assert.throws(
+      () => parseCliArguments(['join', '--max-income-band', '3']),
+      /--max-income-band is only valid with deploy/,
+    );
+    assert.deepEqual(
+      parseCliArguments([
+        'deploy',
+        '--round-id',
+        'ab'.repeat(32),
+        '--max-income-band',
+        '3',
+        '--min-gpa-scaled',
+        '300',
+      ]),
+      {
+        command: 'deploy',
+        json: false,
+        maxIncomeBand: '3',
+        minGpaScaled: '300',
+        roundId: 'ab'.repeat(32),
+      },
     );
     assert.throws(
       () => parseCliArguments(['commit-score', '--contract-address', sampleContractAddress()]),
@@ -447,12 +489,7 @@ describe('AEQUIRA CLI secret storage', () => {
     });
     const contractAddress = sampleContractAddress();
     const signingKey = sampleSigningKey();
-    const privateState = {
-      adminSecret: new Uint8Array(32).fill(1),
-      reviewerSecret: new Uint8Array(32).fill(2),
-      score: 73n,
-      scoreSalt: new Uint8Array(32).fill(3),
-    };
+    const privateState = privateStateFixture({ score: 73n });
     const password = 'R7!mQ2@vL9#zT4$p';
     let sourceStore;
     let targetStore;
@@ -524,12 +561,7 @@ const readyChecks = [
   { name: 'proof-server', ok: true, detail: 'ready' },
 ];
 
-const validCommandPrivateState = () => ({
-  adminSecret: new Uint8Array(32).fill(1),
-  reviewerSecret: new Uint8Array(32).fill(2),
-  score: 0n,
-  scoreSalt: new Uint8Array(32).fill(3),
-});
+const validCommandPrivateState = () => privateStateFixture();
 
 const createCommandRuntime = (existingPrivateState = null, { dustBalance = 1n } = {}) => {
   const calls = [];
@@ -636,7 +668,7 @@ describe('AEQUIRA CLI deployment commands', () => {
     let readSecrets = false;
 
     await assert.rejects(
-      runDeployCommand(loadCliConfig({ environment: {} }), 'ab'.repeat(32), {
+      runDeployCommand(loadCliConfig({ environment: {} }), 'ab'.repeat(32), '3', '300', {
         runPrerequisiteChecks: async () => [{ name: 'proof-server', ok: false, detail: 'offline' }],
         readSecrets: async () => {
           readSecrets = true;
@@ -654,8 +686,9 @@ describe('AEQUIRA CLI deployment commands', () => {
     const walletSeed = new Uint8Array(32).fill(3);
     let capturedPrivateState;
     let capturedRoundId;
+    let capturedThresholds;
     const contractAddress = sampleContractAddress();
-    const result = await runDeployCommand(config, 'ab'.repeat(32), {
+    const result = await runDeployCommand(config, 'ab'.repeat(32), '3', '300', {
       runPrerequisiteChecks: async () => readyChecks,
       readSecrets: async () => ({
         privateStatePassword: 'R7!mQ2@vL9#zT4$p',
@@ -666,6 +699,10 @@ describe('AEQUIRA CLI deployment commands', () => {
         calls.push('deploy');
         capturedPrivateState = options.privateState;
         capturedRoundId = Uint8Array.from(options.roundId);
+        capturedThresholds = {
+          maxIncomeBand: options.maxIncomeBand,
+          minGpaScaled: options.minGpaScaled,
+        };
         assert.equal(
           options.privateState.adminSecret.some((byte) => byte !== 0),
           true,
@@ -702,13 +739,23 @@ describe('AEQUIRA CLI deployment commands', () => {
       capturedPrivateState.scoreSalt.every((byte) => byte === 0),
       true,
     );
+    assert.equal(
+      capturedPrivateState.applicantSecret.every((byte) => byte === 0),
+      true,
+    );
+    assert.equal(
+      capturedPrivateState.applicantSalt.every((byte) => byte === 0),
+      true,
+    );
+    assert.equal(capturedThresholds.maxIncomeBand, 3n);
+    assert.equal(capturedThresholds.minGpaScaled, 300n);
 
     const zeroDust = createCommandRuntime(null, { dustBalance: 0n });
     const zeroDustSeed = new Uint8Array(32).fill(16);
     let unexpectedDeploy = false;
 
     await assert.rejects(
-      runDeployCommand(config, 'ab'.repeat(32), {
+      runDeployCommand(config, 'ab'.repeat(32), '3', '300', {
         runPrerequisiteChecks: async () => readyChecks,
         readSecrets: async () => ({
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
@@ -730,6 +777,22 @@ describe('AEQUIRA CLI deployment commands', () => {
     );
   });
 
+  test('refuses a threshold the contract could not store, before opening a wallet', async () => {
+    const config = loadCliConfig({ environment: {} });
+    let touchedPrerequisites = false;
+
+    await assert.rejects(
+      runDeployCommand(config, 'ab'.repeat(32), '256', '300', {
+        runPrerequisiteChecks: async () => {
+          touchedPrerequisites = true;
+          return readyChecks;
+        },
+      }),
+      /Maximum income band must be a whole number between 0 and 255/,
+    );
+    assert.equal(touchedPrerequisites, false);
+  });
+
   test('reports a deployed address when its encrypted backup fails', async () => {
     const config = loadCliConfig({ environment: {} });
     const { calls, runtime } = createCommandRuntime();
@@ -737,7 +800,7 @@ describe('AEQUIRA CLI deployment commands', () => {
     const contractAddress = sampleContractAddress();
 
     await assert.rejects(
-      runDeployCommand(config, 'ab'.repeat(32), {
+      runDeployCommand(config, 'ab'.repeat(32), '3', '300', {
         runPrerequisiteChecks: async () => readyChecks,
         readSecrets: async () => ({
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
@@ -1002,12 +1065,7 @@ describe('AEQUIRA CLI score commands', () => {
   const roundId = new Uint8Array(32).fill(6);
 
   test('commits a masked score, deriving its salt from the round and application', async () => {
-    const privateState = {
-      adminSecret: new Uint8Array(32).fill(1),
-      reviewerSecret: new Uint8Array(32).fill(2),
-      score: 0n,
-      scoreSalt: new Uint8Array(32).fill(3),
-    };
+    const privateState = privateStateFixture();
     const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
     const walletSeed = new Uint8Array(32).fill(7);
     const contractAddress = sampleContractAddress();
@@ -1081,12 +1139,10 @@ describe('AEQUIRA CLI score commands', () => {
     // still holds a *different* application's opening (as it would right
     // after committing that other application), yet revealing this
     // application must still recompute the correct (score, salt) for it.
-    const privateState = {
-      adminSecret: new Uint8Array(32).fill(1),
-      reviewerSecret: new Uint8Array(32).fill(2),
+    const privateState = privateStateFixture({
       score: 42n,
       scoreSalt: new Uint8Array(32).fill(9),
-    };
+    });
     const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
     const walletSeed = new Uint8Array(32).fill(8);
     const contractAddress = sampleContractAddress();
@@ -1170,12 +1226,7 @@ describe('AEQUIRA CLI score commands', () => {
   });
 
   test('preserves finalized call identity when backup creation fails', async () => {
-    const privateState = {
-      adminSecret: new Uint8Array(32).fill(1),
-      reviewerSecret: new Uint8Array(32).fill(2),
-      score: 87n,
-      scoreSalt: new Uint8Array(32).fill(3),
-    };
+    const privateState = privateStateFixture({ score: 87n });
     const { runtime } = createCommandRuntime(privateState);
     const contractAddress = sampleContractAddress();
 
@@ -1213,12 +1264,7 @@ describe('AEQUIRA CLI score commands', () => {
     // gets overwritten. With deterministic, per-application derivation, both
     // stay independently revealable.
     const reviewerSecret = new Uint8Array(32).fill(2);
-    const privateState = {
-      adminSecret: new Uint8Array(32).fill(1),
-      reviewerSecret,
-      score: 0n,
-      scoreSalt: new Uint8Array(32).fill(3),
-    };
+    const privateState = privateStateFixture({ reviewerSecret });
     const { getStoredPrivateState, runtime } = createCommandRuntime(privateState);
     const contractAddress = sampleContractAddress();
     const applicationA = new Uint8Array(32).fill(0xaa);

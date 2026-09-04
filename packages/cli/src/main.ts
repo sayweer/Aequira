@@ -27,7 +27,7 @@ Usage:
   aequira wallet-address [--network preview|preprod] [--json]
   aequira funding-status [--network preview|preprod] [--json]
   aequira register-dust [--network preview|preprod] [--json]
-  aequira deploy --round-id 64_HEX [--network preview|preprod] [--json]
+  aequira deploy --round-id 64_HEX --max-income-band 0-255 --min-gpa-scaled 0-65535 [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
   aequira register-reviewer --contract-address ADDRESS --reviewer-id 64_HEX [--network preview|preprod] [--json]
@@ -121,7 +121,20 @@ const main = async (): Promise<void> => {
       throw new Error('deploy requires --round-id');
     }
 
-    const result = await runDeployCommand(config, args.roundId);
+    if (args.maxIncomeBand === undefined) {
+      throw new Error('deploy requires --max-income-band');
+    }
+
+    if (args.minGpaScaled === undefined) {
+      throw new Error('deploy requires --min-gpa-scaled');
+    }
+
+    const result = await runDeployCommand(
+      config,
+      args.roundId,
+      args.maxIncomeBand,
+      args.minGpaScaled,
+    );
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {

@@ -3,6 +3,7 @@ import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 
 import { createBrowserProviderSession, type BrowserProviderSession } from './browser-providers.js';
 import { withDeploymentStage } from './deployment-errors.js';
+import type { EligibilityThresholds } from './round-inputs.js';
 
 const PRIVATE_VALUE_LENGTH = 32;
 
@@ -18,20 +19,28 @@ export type BrowserAequiraDeployment = {
 export const deployNewAequira = async (
   connectedApi: ConnectedAPI,
   privateStatePassword: string,
+  thresholds: EligibilityThresholds,
 ): Promise<BrowserAequiraDeployment> => {
   const session = await createBrowserProviderSession(connectedApi, privateStatePassword);
 
   try {
-    const privateState = createAequiraPrivateState(
-      randomPrivateValue(),
-      randomPrivateValue(),
-      0n,
-      randomPrivateValue(),
-    );
+    const privateState = createAequiraPrivateState({
+      adminSecret: randomPrivateValue(),
+      reviewerSecret: randomPrivateValue(),
+      score: 0n,
+      scoreSalt: randomPrivateValue(),
+      applicantSecret: randomPrivateValue(),
+      applicantIncomeBand: 0n,
+      applicantGpaScaled: 0n,
+      applicantRegionCode: 0n,
+      applicantSalt: randomPrivateValue(),
+    });
     const contract = await withDeploymentStage('contract-deployment', () =>
       deployAequira(session.providers, {
         privateState,
         roundId: randomPrivateValue(),
+        maxIncomeBand: thresholds.maxIncomeBand,
+        minGpaScaled: thresholds.minGpaScaled,
       }),
     );
 

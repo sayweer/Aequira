@@ -41,6 +41,12 @@ export const LedgerPanel = ({ round }: LedgerPanelProps) => {
               <dt>Replay nullifiers</dt>
               <dd>{view.nullifierCount}</dd>
             </div>
+            <div>
+              <dt>Eligibility rules</dt>
+              <dd>
+                income &le; {view.maxIncomeBand}, GPA &ge; {view.minGpaScaled}
+              </dd>
+            </div>
           </dl>
 
           {view.tallies.length > 0 && (

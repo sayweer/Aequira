@@ -14,6 +14,8 @@ const committed = (overrides = {}) => ({
   applicationIdHex: APPLICATION,
   commitmentHex: COMMITMENT,
   commitmentOnChain: true,
+  maxIncomeBand: 3,
+  minGpaScaled: 320,
   nullifierHex: NULLIFIER,
   phaseLabel: 'Review',
   revealedCount: null,
@@ -64,6 +66,7 @@ test('scopes each value to the side it belongs on', () => {
       'Score commitment',
       'Replay nullifier',
       'Reviewer membership',
+      'Eligibility rules',
       'Revealed score sum',
       'Revealed count',
     ],
@@ -141,4 +144,19 @@ test('produces valid JSON for the observer panel', () => {
 
   assert.doesNotThrow(() => JSON.parse(blob));
   assert.equal(JSON.parse(blob).Phase, 'Review');
+});
+
+test('states the eligibility rules publicly and the figures behind them nowhere', () => {
+  // The thresholds are the round's published rules, so they belong in the
+  // observer's view. What must never appear is an applicant's own income band
+  // or grade average, which the circuit only ever compares against them.
+  const disclosure = buildRoundDisclosure(committed());
+  const rules = disclosure.public.find((row) => row.label === 'Eligibility rules');
+
+  assert.ok(rules !== undefined);
+  assert.equal(rules.value, 'income band at most 3; grade average at least 320 (x100)');
+  assert.equal(
+    disclosure.local.some((row) => row.label === 'Eligibility rules'),
+    false,
+  );
 });

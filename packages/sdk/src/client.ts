@@ -17,9 +17,18 @@ import {
 
 const BYTE_LENGTH = 32;
 
+const MAX_UINT8 = 255n;
+const MAX_UINT16 = 65535n;
+
 const assertBytes32 = (name: string, value: Uint8Array): void => {
   if (value.byteLength !== BYTE_LENGTH) {
     throw new RangeError(`${name} must contain exactly ${BYTE_LENGTH} bytes`);
+  }
+};
+
+const assertUintRange = (name: string, value: bigint, maximum: bigint): void => {
+  if (value < 0n || value > maximum) {
+    throw new RangeError(`${name} must be between 0 and ${maximum}`);
   }
 };
 
@@ -27,10 +36,18 @@ export const validateAequiraPrivateState = (privateState: AequiraPrivateState): 
   assertBytes32('adminSecret', privateState.adminSecret);
   assertBytes32('reviewerSecret', privateState.reviewerSecret);
   assertBytes32('scoreSalt', privateState.scoreSalt);
+  assertBytes32('applicantSecret', privateState.applicantSecret);
+  assertBytes32('applicantSalt', privateState.applicantSalt);
 
   if (privateState.score < 0n || privateState.score > 100n) {
     throw new RangeError('score must be between 0 and 100');
   }
+
+  // The circuit's own witness types are Uint<8>, Uint<16> and Uint<8>. Catching
+  // an out-of-range attribute here fails the call before a proof is attempted.
+  assertUintRange('applicantIncomeBand', privateState.applicantIncomeBand, MAX_UINT8);
+  assertUintRange('applicantGpaScaled', privateState.applicantGpaScaled, MAX_UINT16);
+  assertUintRange('applicantRegionCode', privateState.applicantRegionCode, MAX_UINT8);
 };
 
 export const deriveReviewerId = (reviewerSecret: Uint8Array): Uint8Array => {
@@ -87,6 +104,13 @@ export const deriveScoreCommitment = (
 export type DeployAequiraOptions = {
   readonly roundId: Uint8Array;
   readonly privateState: AequiraPrivateState;
+  /**
+   * The eligibility rules. They are constructor arguments rather than a later
+   * admin call so that the criteria a round announces are fixed before it can
+   * take a single application.
+   */
+  readonly maxIncomeBand: bigint;
+  readonly minGpaScaled: bigint;
 };
 
 export const deployAequira = async (
@@ -94,13 +118,20 @@ export const deployAequira = async (
   options: DeployAequiraOptions,
 ): Promise<FoundAequiraContract> => {
   assertBytes32('roundId', options.roundId);
+  assertUintRange('maxIncomeBand', options.maxIncomeBand, MAX_UINT8);
+  assertUintRange('minGpaScaled', options.minGpaScaled, MAX_UINT16);
   validateAequiraPrivateState(options.privateState);
 
   const deployed = await deployContract<AequiraContract>(providers, {
     compiledContract: compiledAequiraContract,
     privateStateId: AEQUIRA_PRIVATE_STATE_ID,
     initialPrivateState: options.privateState,
-    args: [options.roundId, options.privateState.adminSecret],
+    args: [
+      options.roundId,
+      options.privateState.adminSecret,
+      options.maxIncomeBand,
+      options.minGpaScaled,
+    ],
   });
 
   providers.privateStateProvider.setContractAddress(deployed.deployTxData.public.contractAddress);

@@ -8,18 +8,38 @@ export type AequiraPrivateState = {
   readonly reviewerSecret: Uint8Array;
   readonly score: bigint;
   readonly scoreSalt: Uint8Array;
+  /**
+   * The applicant half of the round. It is held beside the reviewer half rather
+   * than in a separate store because one encrypted private state exists per
+   * contract per person, and the same person may hold both roles.
+   *
+   * The attributes and salt are not chosen locally: they are what the
+   * institution verified and committed to at enrollment, and `apply` recomputes
+   * the enrollment leaf from them, so values that were never enrolled produce a
+   * leaf that is in no tree.
+   */
+  readonly applicantSecret: Uint8Array;
+  readonly applicantIncomeBand: bigint;
+  readonly applicantGpaScaled: bigint;
+  readonly applicantRegionCode: bigint;
+  readonly applicantSalt: Uint8Array;
 };
 
-export const createAequiraPrivateState = (
-  adminSecret: Uint8Array,
-  reviewerSecret: Uint8Array,
-  score: bigint,
-  scoreSalt: Uint8Array,
-): AequiraPrivateState => ({
-  adminSecret,
-  reviewerSecret,
-  score,
-  scoreSalt,
+/**
+ * Takes a single object rather than positional arguments: the state now holds
+ * nine fields, four of which are 32-byte arrays that no call site could tell
+ * apart in a positional list.
+ */
+export const createAequiraPrivateState = (values: AequiraPrivateState): AequiraPrivateState => ({
+  adminSecret: values.adminSecret,
+  reviewerSecret: values.reviewerSecret,
+  score: values.score,
+  scoreSalt: values.scoreSalt,
+  applicantSecret: values.applicantSecret,
+  applicantIncomeBand: values.applicantIncomeBand,
+  applicantGpaScaled: values.applicantGpaScaled,
+  applicantRegionCode: values.applicantRegionCode,
+  applicantSalt: values.applicantSalt,
 });
 
 export const witnesses = {
@@ -73,4 +93,66 @@ export const witnesses = {
     privateState,
     privateState.scoreSalt,
   ],
+  applicantSecret: ({
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, Uint8Array] => [
+    privateState,
+    privateState.applicantSecret,
+  ],
+  applicantIncomeBand: ({
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, bigint] => [
+    privateState,
+    privateState.applicantIncomeBand,
+  ],
+  applicantGpaScaled: ({
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, bigint] => [
+    privateState,
+    privateState.applicantGpaScaled,
+  ],
+  applicantRegionCode: ({
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, bigint] => [
+    privateState,
+    privateState.applicantRegionCode,
+  ],
+  applicantSalt: ({
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [AequiraPrivateState, Uint8Array] => [
+    privateState,
+    privateState.applicantSalt,
+  ],
+  /**
+   * The applicant's own enrollment path, looked up in the public tree.
+   *
+   * Same shape as `reviewerMerklePath`: the path comes from the ledger so there
+   * is no local copy to go stale and no hand-written Merkle code to get wrong.
+   * `apply` still recomputes the leaf from these witnesses and asserts it
+   * matches, so a path fetched for anyone else is refused by the circuit.
+   */
+  applicantMerklePath: ({
+    ledger,
+    privateState,
+  }: WitnessContext<Ledger, AequiraPrivateState>): [
+    AequiraPrivateState,
+    MerkleTreePath<Uint8Array>,
+  ] => {
+    const leaf = pureCircuits.applicantLeaf(
+      privateState.applicantIncomeBand,
+      privateState.applicantGpaScaled,
+      privateState.applicantRegionCode,
+      privateState.applicantSecret,
+      privateState.applicantSalt,
+    );
+    const path = ledger.applicantTree.findPathForLeaf(leaf);
+
+    if (path === undefined) {
+      // Names no attribute and no secret: it says only that no enrollment
+      // commitment in the public tree opens to what this client holds.
+      throw new Error('This applicant is not enrolled in the round');
+    }
+
+    return [privateState, path];
+  },
 };

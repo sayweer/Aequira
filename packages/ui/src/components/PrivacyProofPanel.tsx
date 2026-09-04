@@ -22,6 +22,8 @@ export const PrivacyProofPanel = ({ round }: PrivacyProofPanelProps) => {
     applicationIdHex: lastCommitted?.applicationIdHex ?? null,
     commitmentHex: lastOpening?.commitmentHex ?? null,
     commitmentOnChain,
+    maxIncomeBand: view.maxIncomeBand,
+    minGpaScaled: view.minGpaScaled,
     nullifierHex: lastOpening?.nullifierHex ?? null,
     phaseLabel: view.phaseLabel,
     revealedCount: tally?.revealedCount ?? null,

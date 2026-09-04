@@ -22,6 +22,8 @@ export type AequiraLedgerLike = {
   readonly phase: number;
   readonly roundId: Uint8Array;
   readonly adminAuthority: Uint8Array;
+  readonly maxIncomeBand: bigint;
+  readonly minGpaScaled: bigint;
   readonly reviewers: LedgerSet;
   readonly scoreNullifiers: LedgerSet;
   readonly scoreCommitments: LedgerSet;
@@ -40,6 +42,9 @@ export type RoundView = {
   readonly phase: number;
   readonly phaseLabel: string;
   readonly roundIdHex: string;
+  /** The eligibility rules the round announced. Fixed at deployment. */
+  readonly maxIncomeBand: number;
+  readonly minGpaScaled: number;
   readonly reviewerIdHexes: readonly string[];
   readonly commitmentHexes: readonly string[];
   readonly nullifierCount: number;
@@ -92,6 +97,8 @@ export const toRoundView = (
   knownApplicationIdHexes: readonly string[],
 ): RoundView => ({
   commitmentHexes: [...ledger.scoreCommitments].map(bytesToHex),
+  maxIncomeBand: Number(ledger.maxIncomeBand),
+  minGpaScaled: Number(ledger.minGpaScaled),
   nullifierCount: Number(ledger.scoreNullifiers.size()),
   phase: ledger.phase,
   phaseLabel: phaseLabel(ledger.phase),

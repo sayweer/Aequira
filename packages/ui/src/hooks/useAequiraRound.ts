@@ -8,7 +8,13 @@ import {
 } from '../deployment-errors.js';
 import type { ProofMode } from '../proof-mode.js';
 import type { RoundView } from '../round-format.js';
-import { InputError, parseApplicationId, parseScore } from '../round-inputs.js';
+import {
+  InputError,
+  parseApplicationId,
+  parseEligibilityThresholds,
+  parseScore,
+  type EligibilityThresholds,
+} from '../round-inputs.js';
 import {
   advancePhase,
   commitScore,
@@ -49,7 +55,12 @@ export type AequiraRound = {
   advance(transition: PhaseTransition): Promise<void>;
   clear(): void;
   commit(applicationIdInput: string, scoreInput: string): Promise<void>;
-  deploy(password: string, confirmation: string): Promise<void>;
+  deploy(
+    password: string,
+    confirmation: string,
+    maxIncomeBand: string,
+    minGpaScaled: string,
+  ): Promise<void>;
   dismissError(): void;
   join(password: string, confirmation: string, addressInput: string): Promise<void>;
   refresh(): Promise<void>;
@@ -262,8 +273,28 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
         setLastCommitted({ applicationIdHex, score });
       }),
 
-    deploy: (password: string, confirmation: string) =>
-      openSession('deploy', password, confirmation, deployRound),
+    // The thresholds are validated before the session opens: a malformed
+    // number is a form error the user can fix, not a deployment failure to be
+    // mapped like a chain or wallet one.
+    deploy: async (
+      password: string,
+      confirmation: string,
+      maxIncomeBand: string,
+      minGpaScaled: string,
+    ) => {
+      let thresholds: EligibilityThresholds;
+
+      try {
+        thresholds = parseEligibilityThresholds(maxIncomeBand, minGpaScaled);
+      } catch (caught) {
+        setError(toActionErrorMessage(caught, toCircuitErrorMessage));
+        return;
+      }
+
+      await openSession('deploy', password, confirmation, (api, secret) =>
+        deployRound(api, secret, thresholds),
+      );
+    },
 
     dismissError: () => setError(null),
 

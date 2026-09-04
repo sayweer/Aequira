@@ -27,6 +27,8 @@ export type CliArguments = {
   readonly command: CliCommand;
   readonly contractAddress?: string;
   readonly json: boolean;
+  readonly maxIncomeBand?: string;
+  readonly minGpaScaled?: string;
   readonly network?: AequiraNetwork;
   readonly proofServer?: string;
   readonly reviewerId?: string;
@@ -74,6 +76,8 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   let applicationId: string | undefined;
   let backupFile: string | undefined;
   let contractAddress: string | undefined;
+  let maxIncomeBand: string | undefined;
+  let minGpaScaled: string | undefined;
   let network: AequiraNetwork | undefined;
   let proofServer: string | undefined;
   let reviewerId: string | undefined;
@@ -128,6 +132,18 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--max-income-band') {
+      maxIncomeBand = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
+    if (option === '--min-gpa-scaled') {
+      minGpaScaled = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     if (option === '--reviewer-id') {
       reviewerId = readOptionValue(options, index, option);
       index += 1;
@@ -159,6 +175,22 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
 
   if (commandValue !== 'deploy' && roundId !== undefined) {
     throw new Error('--round-id is only valid with deploy');
+  }
+
+  if (commandValue === 'deploy' && maxIncomeBand === undefined) {
+    throw new Error('deploy requires --max-income-band');
+  }
+
+  if (commandValue !== 'deploy' && maxIncomeBand !== undefined) {
+    throw new Error('--max-income-band is only valid with deploy');
+  }
+
+  if (commandValue === 'deploy' && minGpaScaled === undefined) {
+    throw new Error('deploy requires --min-gpa-scaled');
+  }
+
+  if (commandValue !== 'deploy' && minGpaScaled !== undefined) {
+    throw new Error('--min-gpa-scaled is only valid with deploy');
   }
 
   if (requiresContractAddress && contractAddress === undefined) {
@@ -199,6 +231,8 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     ...(applicationId === undefined ? {} : { applicationId }),
     ...(backupFile === undefined ? {} : { backupFile }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
+    ...(maxIncomeBand === undefined ? {} : { maxIncomeBand }),
+    ...(minGpaScaled === undefined ? {} : { minGpaScaled }),
     ...(network === undefined ? {} : { network }),
     ...(proofServer === undefined ? {} : { proofServer }),
     ...(reviewerId === undefined ? {} : { reviewerId }),

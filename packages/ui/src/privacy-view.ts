@@ -29,6 +29,9 @@ export type RoundDisclosureInput = {
   readonly phaseLabel: string;
   readonly revealedCount: number | null;
   readonly roundIdHex: string;
+  /** The eligibility rules, fixed when the round was deployed. */
+  readonly maxIncomeBand: number;
+  readonly minGpaScaled: number;
   /** The score entered in this tab, or null before anything is committed. */
   readonly score: number | null;
   readonly scoreSum: number | null;
@@ -112,6 +115,13 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
       label: 'Reviewer membership',
       scope: 'public',
       value: 'root matches; the acting reviewer is not recorded',
+    },
+    {
+      detail:
+        'Published with the round and unchangeable once it is open, so an application can be checked against the rules it was judged by. An applicant proves they clear these without publishing their income band or grade average.',
+      label: 'Eligibility rules',
+      scope: 'public',
+      value: `income band at most ${input.maxIncomeBand}; grade average at least ${input.minGpaScaled} (x100)`,
     },
     {
       detail:

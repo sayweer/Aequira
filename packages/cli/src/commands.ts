@@ -61,6 +61,25 @@ export const parseScore = (value: string): bigint => {
   return score;
 };
 
+/**
+ * Parses one of the round's published eligibility thresholds. The maximum is
+ * the width of the matching ledger field, so a value the contract could not
+ * store is refused before a wallet is opened.
+ */
+export const parseThreshold = (name: string, value: string, maximum: bigint): bigint => {
+  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error(`${name} must be a whole number between 0 and ${maximum}`);
+  }
+
+  const parsed = BigInt(value);
+
+  if (parsed > maximum) {
+    throw new Error(`${name} must be a whole number between 0 and ${maximum}`);
+  }
+
+  return parsed;
+};
+
 export const parseContractAddress = (value: string): ContractAddress => {
   try {
     assertIsContractAddress(value);
@@ -84,6 +103,8 @@ const clearPrivateState = (privateState: AequiraPrivateState): void => {
   privateState.adminSecret.fill(0);
   privateState.reviewerSecret.fill(0);
   privateState.scoreSalt.fill(0);
+  privateState.applicantSecret.fill(0);
+  privateState.applicantSalt.fill(0);
 };
 
 const assertWalletHasDust = async (wallet: AequiraWalletProvider): Promise<void> => {
@@ -97,7 +118,17 @@ const assertWalletHasDust = async (wallet: AequiraWalletProvider): Promise<void>
 };
 
 const createFreshPrivateState = (): AequiraPrivateState =>
-  createAequiraPrivateState(randomBytes(32), randomBytes(32), 0n, randomBytes(32));
+  createAequiraPrivateState({
+    adminSecret: randomBytes(32),
+    reviewerSecret: randomBytes(32),
+    score: 0n,
+    scoreSalt: randomBytes(32),
+    applicantSecret: randomBytes(32),
+    applicantIncomeBand: 0n,
+    applicantGpaScaled: 0n,
+    applicantRegionCode: 0n,
+    applicantSalt: randomBytes(32),
+  });
 
 export type CommandDependencies = {
   readonly createWalletProvider?: typeof AequiraWalletProvider.create;
@@ -223,9 +254,13 @@ const writeFinalizedCallBackup = async (
 export const runDeployCommand = async (
   config: CliConfig,
   roundIdHex: string,
+  maxIncomeBandValue: string,
+  minGpaScaledValue: string,
   dependencies: CommandDependencies = {},
 ): Promise<DeployCommandResult> => {
   const roundId = parseBytes32('round ID', roundIdHex);
+  const maxIncomeBand = parseThreshold('Maximum income band', maxIncomeBandValue, 255n);
+  const minGpaScaled = parseThreshold('Minimum scaled grade average', minGpaScaledValue, 65535n);
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
@@ -246,6 +281,8 @@ export const runDeployCommand = async (
     const deployed = await (dependencies.deployContract ?? deployAequira)(runtime.providers, {
       roundId,
       privateState,
+      maxIncomeBand,
+      minGpaScaled,
     });
     const contractAddress = deployed.deployTxData.public.contractAddress;
     let backupPath: string;
@@ -726,12 +763,12 @@ const runScoreOpeningCall = async (
       contractAddress,
     );
     const scoreSalt = await deriveScoreSalt(roundId, applicationId, reviewerSecret);
-    nextPrivateState = createAequiraPrivateState(
-      Uint8Array.from(currentPrivateState.adminSecret),
+    nextPrivateState = createAequiraPrivateState({
+      ...currentPrivateState,
       reviewerSecret,
       score,
       scoreSalt,
-    );
+    });
     await setAequiraPrivateState(runtime.providers, contractAddress, nextPrivateState);
 
     const txData = await submitCall(contract);
