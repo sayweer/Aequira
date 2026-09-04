@@ -6,14 +6,14 @@
 through a commit–reveal flow: the score is proven valid while it is still hidden,
 and the tally is publicly verifiable once it is opened.
 
-|                      |                                                                                                      |
-| -------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Live demo**        | `TODO_DEMO_URL`                                                                                      |
-| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                |
-| **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                              |
-| **Network**          | Midnight Preprod                                                                                     |
-| **Circuits**         | 6 (`registerReviewer`, `openApplications`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 130 (`pnpm test`)                                                                                    |
+|                      |                                                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **Live demo**        | `TODO_DEMO_URL`                                                                                                                    |
+| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                              |
+| **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                                                            |
+| **Network**          | Midnight Preprod                                                                                                                   |
+| **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
+| **Tests**            | 145 (`pnpm test`)                                                                                                                  |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -63,21 +63,25 @@ scoring circuit is refused outside its own phase.
 stateDiagram-v2
     [*] --> SETUP: deploy
     SETUP --> SETUP: registerReviewer
+    SETUP --> SETUP: registerApplicant
     SETUP --> APPLY: openApplications
+    APPLY --> APPLY: apply
     APPLY --> REVIEW: openReview
     REVIEW --> REVIEW: commitScore
     REVIEW --> REVEAL: openReveal
     REVEAL --> REVEAL: revealScore
 ```
 
-| Circuit            | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                  |
-| ------------------ | ----------- | ------------------------- | ------------------------------------- | -------------------------------------------------- |
-| `registerReviewer` | `SETUP`     | `adminSecret`             | `reviewers`, `reviewerTree`           | rejects an already-registered pseudonym            |
-| `openApplications` | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
-| `openReview`       | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                           |
-| `openReveal`       | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                           |
-| `commitScore`      | `REVIEW`    | a Merkle membership proof | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`   |
-| `revealScore`      | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed from the set once opened |
+| Circuit             | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                    |
+| ------------------- | ----------- | ------------------------- | ------------------------------------- | ---------------------------------------------------- |
+| `registerReviewer`  | `SETUP`     | `adminSecret`             | `reviewers`, `reviewerTree`           | rejects an already-registered pseudonym              |
+| `registerApplicant` | `SETUP`     | `adminSecret`             | `applicantTree`                       | one nullifier per applicant makes re-enrolling inert |
+| `openApplications`  | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                             |
+| `apply`             | `APPLY`     | an enrollment opening     | `applyNullifiers`, `applications`     | `applyNullifier(roundId, secret)`                    |
+| `openReview`        | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                             |
+| `openReveal`        | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                             |
+| `commitScore`       | `REVIEW`    | a Merkle membership proof | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`     |
+| `revealScore`       | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed from the set once opened   |
 
 Four properties are worth reading the contract for
 ([`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact)):
@@ -85,6 +89,13 @@ Four properties are worth reading the contract for
 - **The reviewer is authorized without being named.** `commitScore` reconstructs the
   roster's Merkle root from a private path, so the ledger learns that some registered
   reviewer scored, not which one. See [Reviewer unlinkability](#reviewer-unlinkability).
+- **Eligibility is proven without the figures behind it.** `apply` recomputes the
+  institution's enrollment commitment from private attributes, proves it is in the
+  applicant tree, and compares the income band and grade average against the round's
+  published thresholds. The ledger gains a nullifier and a pseudonym; the income band,
+  grade average and region never leave the circuit. Because the applicant's secret
+  never reaches the institution, not even the institution that enrolled them can match
+  an application back to a person.
 - **The score is range-proven while hidden.** `commitScore` asserts `score <= 100`
   against a witness value and publishes only `persistentCommit(…score…, salt)`.
 - **The nullifier is scoped to one application.** It is derived from the round, the
@@ -106,16 +117,20 @@ The contract is explicit about this split. Every `disclose()` call in
 [`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact)
 carries an adjacent comment stating why publishing that value is safe.
 
-| Public ledger                                           | Private witness                              |
-| ------------------------------------------------------- | -------------------------------------------- |
-| `phase` — the current round phase                       | `adminSecret` — authorizes phase transitions |
-| `roundId` — public round metadata                       | `reviewerSecret` — identifies the reviewer   |
-| `adminAuthority` — a hash of the admin secret           | `reviewScore` — the score, until reveal      |
-| `reviewers` — hashed reviewer pseudonyms                | `reviewSalt` — hides the low-entropy score   |
-| `reviewerTree` — the same roster, as a Merkle tree      | `reviewerMerklePath` — proves membership     |
-| `scoreCommitments` — salted score commitments           |                                              |
-| `scoreNullifiers` — replay protection                   |                                              |
-| `scoreSums`, `revealedCounts` — the tally, after reveal |                                              |
+| Public ledger                                           | Private witness                                                                      |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `phase` — the current round phase                       | `adminSecret` — authorizes phase transitions                                         |
+| `roundId` — public round metadata                       | `reviewerSecret` — identifies the reviewer                                           |
+| `adminAuthority` — a hash of the admin secret           | `reviewScore` — the score, until reveal                                              |
+| `reviewers` — hashed reviewer pseudonyms                | `reviewSalt` — hides the low-entropy score                                           |
+| `reviewerTree` — the same roster, as a Merkle tree      | `reviewerMerklePath` — proves membership                                             |
+| `maxIncomeBand`, `minGpaScaled` — the published rules   | `applicantSecret` — identifies the applicant                                         |
+| `applicantTree` — enrollment commitments                | `applicantIncomeBand`, `applicantGpaScaled`, `applicantRegionCode` — never disclosed |
+| `applyNullifiers` — one application per applicant       | `applicantSalt` — opens the enrollment commitment                                    |
+| `applications` — unlinkable application pseudonyms      | `applicantMerklePath` — proves enrollment                                            |
+| `scoreCommitments` — salted score commitments           |                                                                                      |
+| `scoreNullifiers` — replay protection                   |                                                                                      |
+| `scoreSums`, `revealedCounts` — the tally, after reveal |                                                                                      |
 
 A witness is a value the circuit reads but the transaction never carries. The score
 is the clearest case: `commitScore` reads it, proves it is within the rubric range,
@@ -204,7 +219,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 130 tests: 14 contract, 16 sdk, 63 ui, 37 cli
+pnpm test            # 145 tests: 23 contract, 17 sdk, 67 ui, 38 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -240,7 +255,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 130 tests, no proof server needed
+pnpm test                   # 145 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -401,7 +416,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 24 ZK assets |
-| Passing test suite                         | 124 tests, `pnpm test`; CI `verify` job                                          |
+| Passing test suite                         | 145 tests, `pnpm test`; CI `verify` job                                          |
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
@@ -421,7 +436,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 124                                                                  |
+| Minimum 3 tests passing              | 145                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |

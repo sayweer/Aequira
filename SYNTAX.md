@@ -215,7 +215,53 @@ without the `path.leaf == reviewerId(secret)` assertion any caller could present
 registered member's leaf and path while deriving the nullifier from their own
 secret, defeating replay protection entirely.
 
-## Still unresolved before the relevant circuit
+## Circuit cost, measured rather than guessed
 
-- Constraint statistics need a supported compiler or artifact inspection method
-  before the heavy `apply` circuit is accepted.
+Verified on 2026-09-04 with the same toolchain, by compiling the contract with
+`apply` present.
+
+Compiler 0.31.1 still prints neither `k` nor `rows`, but the generated artifacts
+answer the question directly. The instruction count in
+`src/managed/aequira/zkir/<circuit>.zkir` is a faithful size proxy, and the
+prover key size shows which power-of-two class the circuit lands in:
+
+| Circuit             | ZKIR instructions | Prover key |
+| ------------------- | ----------------- | ---------- |
+| `apply`             | 283               | 9.98 MB    |
+| `commitScore`       | 248               | 9.99 MB    |
+| `revealScore`       | 245               | 5.21 MB    |
+| `registerReviewer`  | 159               | 2.82 MB    |
+| `registerApplicant` | 112               | 2.82 MB    |
+
+Read it with:
+
+```bash
+python3 -c "
+import json, glob, os
+for f in sorted(glob.glob('packages/contract/src/managed/aequira/zkir/*.zkir')):
+    print(os.path.basename(f), len(json.load(open(f))['instructions']))
+"
+```
+
+`apply` was expected to be the heavy one — a Merkle path, a five-element
+commitment and two comparisons. It is 14% larger than `commitScore` and shares
+its prover-key size class, which is the circuit that already proves in the
+browser. There was no need to reduce the Merkle depth.
+
+## Applicant attribute encoding
+
+- Numeric witnesses cast to hash payload elements the same way a score does:
+  `incomeBand as Bytes<32>` compiles for `Uint<8>` as well as `Uint<16>`. The
+  plan's `u8ToBytes`/`u16ToBytes` helpers do not exist.
+- The three attributes are declared as three separate witnesses rather than one
+  tuple-returning witness. A tuple return has not been verified against this
+  language version, and three witnesses cost nothing extra.
+- Comparing a private witness against a public ledger field inside `assert`
+  needs no `disclose()`: only the verdict leaves the circuit, and it leaves only
+  as the fact that a proof was accepted.
+
+## Still unresolved
+
+- Nothing blocking. The `claim` circuit will need `applicationPseudonym` to be
+  reproducible from `(roundId, applicantSecret, nonce)` alone, which is why the
+  nonce — not the enrollment salt — is its commitment randomness.
