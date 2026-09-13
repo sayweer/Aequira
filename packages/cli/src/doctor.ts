@@ -5,10 +5,12 @@ import path from 'node:path';
 import type { CliConfig } from './config.js';
 
 const CIRCUITS = [
+  'apply',
   'commitScore',
   'openApplications',
   'openReveal',
   'openReview',
+  'registerApplicant',
   'registerReviewer',
   'revealScore',
 ] as const;
