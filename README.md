@@ -223,9 +223,9 @@ pnpm test            # 145 tests: 23 contract, 17 sdk, 67 ui, 38 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
-from source and prints the 6 circuits. CI does the same on every push in a separate
+from source and prints the 8 circuits. CI does the same on every push in a separate
 job: it compiles into a temporary directory — never over the tracked output — and then
-asserts that all six circuits produced a non-empty prover key, verifier key and ZKIR.
+asserts that all eight circuits produced a non-empty prover key, verifier key and ZKIR.
 
 Then read four things, in this order:
 
@@ -236,7 +236,7 @@ Then read four things, in this order:
    asserts the serialized public ledger view never contains a committed score.
 3. [`packages/ui/src/round-salt.ts`](packages/ui/src/round-salt.ts) — why the salt is
    derived rather than random, explained under [Architecture](#architecture).
-4. [`packages/contract/src/managed/`](packages/contract/src/managed) — 24 generated ZK
+4. [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 generated ZK
    assets (prover key, verifier key, ZKIR and binary ZKIR per circuit), tracked in Git
    so the build output is reviewable without running the compiler.
 
@@ -399,7 +399,7 @@ open reveal → reveal, and the on-chain tally moving to match the opened score.
 ## Verification
 
 ```bash
-pnpm compact:check   # format check, then compile 6 circuits
+pnpm compact:check   # format check, then compile 8 circuits
 pnpm format:check
 pnpm build
 pnpm typecheck
@@ -415,22 +415,22 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | Requirement                                | Where                                                                            |
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
-| Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 24 ZK assets |
+| Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
 | Passing test suite                         | 145 tests, `pnpm test`; CI `verify` job                                          |
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
-| Meaningful commit history                  | `git log --oneline` — 39 commits                                                 |
+| Meaningful commit history                  | `git log --oneline` — 52 commits                                                 |
 
 **Level 2 — wallet, frontend, observable privacy**
 
-| Requirement                      | Where                                                         |
-| -------------------------------- | ------------------------------------------------------------- |
-| Lace connect / disconnect        | `packages/ui/src/hooks/useWalletConnection.ts`                |
-| Circuit called from the frontend | `packages/ui/src/round.ts`; all six circuits                  |
-| Observable privacy behaviour     | [Observable privacy behaviour](#observable-privacy-behaviour) |
-| Live demo link                   | table at the top of this file                                 |
-| Demo video                       | [Demo video](#demo-video)                                     |
+| Requirement                      | Where                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Lace connect / disconnect        | `packages/ui/src/hooks/useWalletConnection.ts`                                                                           |
+| Circuit called from the frontend | `packages/ui/src/round.ts`; 6 of 8 — `apply` and `registerApplicant` are compiled and tested but not yet wired to the UI |
+| Observable privacy behaviour     | [Observable privacy behaviour](#observable-privacy-behaviour)                                                            |
+| Live demo link                   | table at the top of this file                                                                                            |
+| Demo video                       | [Demo video](#demo-video)                                                                                                |
 
 **Level 3 — production dApp**
 
