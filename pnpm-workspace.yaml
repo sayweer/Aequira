@@ -5,3 +5,10 @@ allowBuilds:
   classic-level: true
   esbuild: true
   msgpackr-extract: false
+# Transitive-only advisories inside vite's own dependency tree (dev toolchain,
+# never shipped in the built app): forced to their patched versions rather than
+# waiting on vite/vite-plugin-top-level-await to bump them upstream.
+overrides:
+  nanoid: '>=3.3.18'
+  uuid: '>=11.1.1'
+  esbuild: '>=0.28.1'
