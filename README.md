@@ -439,7 +439,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
-| Meaningful commit history                  | `git log --oneline` — 52 commits                                                 |
+| Meaningful commit history                  | `git log --oneline` — well past the 5-commit minimum                             |
 
 **Level 2 — wallet, frontend, observable privacy**
 
