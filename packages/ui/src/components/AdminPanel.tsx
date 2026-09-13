@@ -17,6 +17,7 @@ type AdminPanelProps = {
 
 export const AdminPanel = ({ round }: AdminPanelProps) => {
   const [reviewerIdInput, setReviewerIdInput] = useState('');
+  const [enrollmentLeafInput, setEnrollmentLeafInput] = useState('');
 
   // Registering anything other than the pseudonym derived from this browser's own
   // reviewer secret would make commitScore fail its membership assertion, so the
@@ -26,6 +27,17 @@ export const AdminPanel = ({ round }: AdminPanelProps) => {
       setReviewerIdInput((current) => (current.length === 0 ? round.reviewerIdHex! : current));
     }
   }, [round.reviewerIdHex]);
+
+  // Prefilled from this browser's own last enrollment, since the same wallet
+  // often plays both the institution and the applicant in this demo. Any
+  // institution can still paste a different leaf here.
+  useEffect(() => {
+    if (round.lastEnrollment !== null) {
+      setEnrollmentLeafInput((current) =>
+        current.length === 0 ? round.lastEnrollment!.enrollmentLeafHex : current,
+      );
+    }
+  }, [round.lastEnrollment]);
 
   const phase = round.view?.phase;
   const next = phase === undefined ? undefined : NEXT_TRANSITION[phase];
@@ -57,6 +69,23 @@ export const AdminPanel = ({ round }: AdminPanelProps) => {
         reviewer without publishing the secret.
       </p>
 
+      <label className="field">
+        <span>Applicant enrollment leaf</span>
+        <input
+          autoComplete="off"
+          disabled={busy || phase !== 0}
+          onChange={(event) => setEnrollmentLeafInput(event.target.value)}
+          placeholder="64 hexadecimal characters"
+          spellCheck={false}
+          type="text"
+          value={enrollmentLeafInput}
+        />
+      </label>
+      <p className="privacy-note">
+        An applicant computes this locally and hands it over. It discloses nothing about their
+        income band, grade average, region or secret.
+      </p>
+
       <div className="button-row">
         <button
           aria-busy={round.busy === 'register'}
@@ -66,6 +95,16 @@ export const AdminPanel = ({ round }: AdminPanelProps) => {
           type="button"
         >
           {round.busy === 'register' ? 'Registering…' : 'Register reviewer'}
+        </button>
+
+        <button
+          aria-busy={round.busy === 'registerApplicant'}
+          className="button button-secondary"
+          disabled={busy || phase !== 0 || enrollmentLeafInput.trim().length === 0}
+          onClick={() => void round.registerApplicant(enrollmentLeafInput)}
+          type="button"
+        >
+          {round.busy === 'registerApplicant' ? 'Registering…' : 'Register applicant'}
         </button>
 
         {next !== undefined && (

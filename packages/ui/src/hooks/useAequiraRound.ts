@@ -17,14 +17,19 @@ import {
 } from '../round-inputs.js';
 import {
   advancePhase,
+  applyToRound,
   commitScore,
   deployRound,
+  enrollApplicant as enrollApplicantCall,
   hasMatchingCommitment,
   joinRound,
+  readLocalApplicantIdHex,
   readLocalReviewerIdHex,
   readRoundState,
+  registerApplicant as registerApplicantCall,
   registerReviewer as registerReviewerCall,
   revealScore,
+  type EnrollmentResult,
   type PhaseTransition,
   type RoundSession,
   type ScoreOpening,
@@ -34,7 +39,16 @@ import { AEQUIRA_NETWORK_ID } from '../wallet.js';
 
 const LEDGER_POLL_INTERVAL_MS = 4_000;
 
-export type RoundActionName = 'commit' | 'deploy' | 'join' | 'phase' | 'register' | 'reveal';
+export type RoundActionName =
+  | 'apply'
+  | 'commit'
+  | 'deploy'
+  | 'enroll'
+  | 'join'
+  | 'phase'
+  | 'register'
+  | 'registerApplicant'
+  | 'reveal';
 
 export type CommittedScore = {
   readonly applicationIdHex: string;
@@ -43,8 +57,10 @@ export type CommittedScore = {
 
 export type AequiraRound = {
   readonly address: string | null;
+  readonly applicantIdHex: string | null;
   readonly busy: RoundActionName | null;
   readonly error: string | null;
+  readonly lastEnrollment: EnrollmentResult | null;
   /** The score the user last entered here. It stays in this tab. */
   readonly lastCommitted: CommittedScore | null;
   readonly lastOpening: ScoreOpening | null;
@@ -53,6 +69,7 @@ export type AequiraRound = {
   readonly reviewerIdHex: string | null;
   readonly view: RoundView | null;
   advance(transition: PhaseTransition): Promise<void>;
+  apply(): Promise<void>;
   clear(): void;
   commit(applicationIdInput: string, scoreInput: string): Promise<void>;
   deploy(
@@ -62,8 +79,10 @@ export type AequiraRound = {
     minGpaScaled: string,
   ): Promise<void>;
   dismissError(): void;
+  enroll(incomeBandInput: string, gpaScaledInput: string, regionCodeInput: string): Promise<void>;
   join(password: string, confirmation: string, addressInput: string): Promise<void>;
   refresh(): Promise<void>;
+  registerApplicant(enrollmentLeafInput: string): Promise<void>;
   registerReviewer(reviewerIdInput: string): Promise<void>;
   reveal(applicationIdInput: string, scoreInput: string): Promise<void>;
 };
@@ -85,6 +104,8 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
   const [busy, setBusy] = useState<RoundActionName | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewerIdHex, setReviewerIdHex] = useState<string | null>(null);
+  const [applicantIdHex, setApplicantIdHex] = useState<string | null>(null);
+  const [lastEnrollment, setLastEnrollment] = useState<EnrollmentResult | null>(null);
   const [lastOpening, setLastOpening] = useState<ScoreOpening | null>(null);
   const [lastCommitted, setLastCommitted] = useState<CommittedScore | null>(null);
   const [applicationIdHexes, setApplicationIdHexes] = useState<readonly string[]>(
@@ -108,6 +129,8 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
     setBusy(null);
     setError(null);
     setReviewerIdHex(null);
+    setApplicantIdHex(null);
+    setLastEnrollment(null);
     setLastOpening(null);
     setLastCommitted(null);
 
@@ -165,6 +188,12 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
         setReviewerIdHex(await readLocalReviewerIdHex(session));
       } catch {
         // A missing reviewer pseudonym only disables prefilling the register form.
+      }
+
+      try {
+        setApplicantIdHex(await readLocalApplicantIdHex(session));
+      } catch {
+        // A missing applicant identity only disables the enrollment display.
       }
     },
     [memory],
@@ -253,6 +282,13 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
       runCall('phase', async (session) => {
         await advancePhase(session, transition);
       }),
+
+    apply: () =>
+      runCall('apply', async (session) => {
+        await applyToRound(session);
+      }),
+
+    applicantIdHex,
     busy,
 
     clear: useCallback(() => {
@@ -298,6 +334,19 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
 
     dismissError: () => setError(null),
 
+    enroll: (incomeBandInput: string, gpaScaledInput: string, regionCodeInput: string) =>
+      runCall('enroll', async (session) => {
+        const enrollment = await enrollApplicantCall(
+          session,
+          incomeBandInput,
+          gpaScaledInput,
+          regionCodeInput,
+        );
+
+        setApplicantIdHex(enrollment.applicantIdHex);
+        setLastEnrollment(enrollment);
+      }),
+
     error,
 
     join: (password: string, confirmation: string, addressInput: string) =>
@@ -306,10 +355,16 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
       ),
 
     lastCommitted,
+    lastEnrollment,
     lastOpening,
     proofMode,
     refresh,
     rememberedAddress,
+
+    registerApplicant: (enrollmentLeafInput: string) =>
+      runCall('registerApplicant', async (session) => {
+        await registerApplicantCall(session, enrollmentLeafInput);
+      }),
 
     registerReviewer: (reviewerIdInput: string) =>
       runCall('register', async (session) => {

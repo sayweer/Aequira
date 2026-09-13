@@ -1,4 +1,5 @@
 import { AdminPanel } from './components/AdminPanel.js';
+import { ApplicantPanel } from './components/ApplicantPanel.js';
 import { ContractPanel } from './components/ContractPanel.js';
 import { LedgerPanel } from './components/LedgerPanel.js';
 import { PrivacyProofPanel } from './components/PrivacyProofPanel.js';
@@ -102,6 +103,7 @@ const App = () => {
         {isOpen && (
           <section className="round-grid" aria-label="Round actions">
             <AdminPanel round={round} />
+            <ApplicantPanel round={round} />
             <ReviewPanel round={round} />
             <LedgerPanel round={round} />
           </section>
