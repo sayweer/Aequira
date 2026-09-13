@@ -13,7 +13,7 @@ and the tally is publicly verifiable once it is opened.
 | **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                                                            |
 | **Network**          | Midnight Preprod                                                                                                                   |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 163 (`pnpm test`)                                                                                                                  |
+| **Tests**            | 166 (`pnpm test`)                                                                                                                  |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -219,7 +219,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 163 tests: 23 contract, 29 sdk, 67 ui, 44 cli
+pnpm test            # 166 tests: 23 contract, 29 sdk, 70 ui, 44 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -255,7 +255,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 163 tests, no proof server needed
+pnpm test                   # 166 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -268,9 +268,14 @@ Open `http://127.0.0.1:3000` in Chrome. Then:
    encrypts private state in this browser and is never sent to Lace or the network.
 3. **Register the reviewer pseudonym** shown in the organizer panel — it is the
    one-way hash of this browser's reviewer secret.
-4. **Open applications**, then **open review**.
-5. **Commit a sealed score** for an application ID (any 32-byte hex value).
-6. **Open reveal**, then **reveal** the same score. The tally appears in the ledger
+4. **Enroll** in the applicant panel with an income band, scaled grade average and
+   region code, then **register** the enrollment leaf it prints — the same browser
+   plays both roles here, but nothing stops a different one from computing the leaf.
+5. **Open applications**, then **submit the application**.
+6. **Open review**, then **commit a sealed score** for an application ID (any
+   32-byte hex value — `commitScore` does not check it against `applications`, see
+   [How a round works](#how-a-round-works)).
+7. **Open reveal**, then **reveal** the same score. The tally appears in the ledger
    panel.
 
 > Keep the browser's site data for this origin. The administrator and reviewer
@@ -430,7 +435,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
-| Passing test suite                         | 163 tests, `pnpm test`; CI `verify` job                                          |
+| Passing test suite                         | 166 tests, `pnpm test`; CI `verify` job                                          |
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
@@ -438,19 +443,19 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 **Level 2 — wallet, frontend, observable privacy**
 
-| Requirement                      | Where                                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Lace connect / disconnect        | `packages/ui/src/hooks/useWalletConnection.ts`                                                                           |
-| Circuit called from the frontend | `packages/ui/src/round.ts`; 6 of 8 — `apply` and `registerApplicant` are compiled and tested but not yet wired to the UI |
-| Observable privacy behaviour     | [Observable privacy behaviour](#observable-privacy-behaviour)                                                            |
-| Live demo link                   | table at the top of this file                                                                                            |
-| Demo video                       | [Demo video](#demo-video)                                                                                                |
+| Requirement                      | Where                                                         |
+| -------------------------------- | ------------------------------------------------------------- |
+| Lace connect / disconnect        | `packages/ui/src/hooks/useWalletConnection.ts`                |
+| Circuit called from the frontend | `packages/ui/src/round.ts`; all eight circuits                |
+| Observable privacy behaviour     | [Observable privacy behaviour](#observable-privacy-behaviour) |
+| Live demo link                   | table at the top of this file                                 |
+| Demo video                       | [Demo video](#demo-video)                                     |
 
 **Level 3 — production dApp**
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 163                                                                  |
+| Minimum 3 tests passing              | 166                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |
