@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  parseApplicantAttributes,
   parseApplicationId,
   parseContractAddressInput,
   parseEligibilityThresholds,
+  parseEnrollmentLeaf,
   parseReviewerId,
   parseScore,
 } from '../.test-build/round-inputs.js';
@@ -29,6 +31,11 @@ test('rejects application identifiers that are not exactly 32 bytes', () => {
 test('reports reviewer identifiers under their own label', () => {
   assert.equal(parseReviewerId(VALID_HEX), VALID_HEX);
   assert.throws(() => parseReviewerId('abc'), /reviewer ID must be exactly 64/);
+});
+
+test('reports enrollment leaves under their own label', () => {
+  assert.equal(parseEnrollmentLeaf(VALID_HEX), VALID_HEX);
+  assert.throws(() => parseEnrollmentLeaf('abc'), /enrollment leaf must be exactly 64/);
 });
 
 test('accepts whole scores within the rubric range', () => {
@@ -92,4 +99,33 @@ test('refuses eligibility rules the contract could not store', () => {
   assert.throws(() => parseEligibilityThresholds('3', '65536'), /between 0 and 65535/);
   assert.throws(() => parseEligibilityThresholds('', '320'), /Enter the maximum income band/);
   assert.throws(() => parseEligibilityThresholds('3', '3.2'), /whole number/);
+});
+
+test('parses an applicant’s attributes the same way apply’s witnesses take them', () => {
+  assert.deepEqual(parseApplicantAttributes('2', '350', '7'), {
+    incomeBand: 2n,
+    gpaScaled: 350n,
+    regionCode: 7n,
+  });
+  assert.deepEqual(parseApplicantAttributes('0', '0', '0'), {
+    incomeBand: 0n,
+    gpaScaled: 0n,
+    regionCode: 0n,
+  });
+});
+
+test('refuses applicant attributes wider than the circuit accepts', () => {
+  assert.throws(
+    () => parseApplicantAttributes('256', '350', '7'),
+    /income band must be a whole number between 0 and 255/i,
+  );
+  assert.throws(
+    () => parseApplicantAttributes('2', '65536', '7'),
+    /grade average.*between 0 and 65535/i,
+  );
+  assert.throws(
+    () => parseApplicantAttributes('2', '350', '256'),
+    /region code must be a whole number between 0 and 255/i,
+  );
+  assert.throws(() => parseApplicantAttributes('', '350', '7'), /Enter the income band/);
 });

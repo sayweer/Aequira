@@ -8,6 +8,9 @@
 import {
   AEQUIRA_PRIVATE_STATE_ID,
   createAequiraPrivateState,
+  deriveApplicantId,
+  deriveApplicantLeaf,
+  deriveApplicationNonce,
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
@@ -30,9 +33,12 @@ import { deployNewAequira } from './deployment.js';
 import type { ProofMode } from './proof-mode.js';
 import { bytesToHex, hexToBytes, toRoundView, type RoundView } from './round-format.js';
 import {
+  parseApplicantAttributes,
   parseApplicationId,
   parseContractAddressInput,
+  parseEnrollmentLeaf,
   parseReviewerId,
+  type ApplicantAttributes,
   type EligibilityThresholds,
 } from './round-inputs.js';
 
@@ -131,6 +137,11 @@ export const readLocalReviewerIdHex = async (session: RoundSession): Promise<str
   return bytesToHex(deriveReviewerId(Uint8Array.from(privateState.reviewerSecret)));
 };
 
+export const readLocalApplicantIdHex = async (session: RoundSession): Promise<string> => {
+  const privateState = await readPrivateState(session);
+  return bytesToHex(deriveApplicantId(Uint8Array.from(privateState.applicantSecret)));
+};
+
 export const registerReviewer = async (
   session: RoundSession,
   reviewerIdHexInput: string,
@@ -139,6 +150,98 @@ export const registerReviewer = async (
 
   const result = await withDeploymentStage('circuit-register-reviewer', () =>
     session.contract.callTx.registerReviewer(reviewerId),
+  );
+
+  return result.public;
+};
+
+export type EnrollmentResult = {
+  readonly applicantIdHex: string;
+  readonly enrollmentLeafHex: string;
+};
+
+/**
+ * Computes the enrollment leaf entirely in this browser, from attributes and
+ * the applicant secret already held in private state — neither ever leaves
+ * it. Only the resulting leaf is returned, for the institution to pass to
+ * `registerApplicant`; there is no path that builds the same leaf from an
+ * applicant ID instead, because `apply`'s own witness recomputes it the same
+ * way to find its Merkle path.
+ *
+ * Reuses the `applicantSecret`/`applicantSalt` this browser already drew at
+ * random when it joined, rather than generating new ones, so enrolling again
+ * with corrected attributes does not orphan a leaf already registered under
+ * the previous ones... unless the attributes actually changed, in which case
+ * it produces a different leaf on purpose.
+ */
+export const enrollApplicant = async (
+  session: RoundSession,
+  incomeBandInput: string,
+  gpaScaledInput: string,
+  regionCodeInput: string,
+): Promise<EnrollmentResult> => {
+  const attributes: ApplicantAttributes = parseApplicantAttributes(
+    incomeBandInput,
+    gpaScaledInput,
+    regionCodeInput,
+  );
+  const current = await readPrivateState(session);
+  const applicantSecret = Uint8Array.from(current.applicantSecret);
+  const applicantSalt = Uint8Array.from(current.applicantSalt);
+  const nextPrivateState = createAequiraPrivateState({
+    ...current,
+    applicantSecret,
+    applicantSalt,
+    applicantIncomeBand: attributes.incomeBand,
+    applicantGpaScaled: attributes.gpaScaled,
+    applicantRegionCode: attributes.regionCode,
+  });
+
+  await withDeploymentStage('private-state-update', () =>
+    setAequiraPrivateState(session.providers, session.address, nextPrivateState),
+  );
+
+  return {
+    applicantIdHex: bytesToHex(deriveApplicantId(applicantSecret)),
+    enrollmentLeafHex: bytesToHex(
+      deriveApplicantLeaf(
+        attributes.incomeBand,
+        attributes.gpaScaled,
+        attributes.regionCode,
+        applicantSecret,
+        applicantSalt,
+      ),
+    ),
+  };
+};
+
+export const registerApplicant = async (
+  session: RoundSession,
+  enrollmentLeafHexInput: string,
+): Promise<FinalizedTxData> => {
+  const enrollmentLeaf = hexToBytes(parseEnrollmentLeaf(enrollmentLeafHexInput));
+
+  const result = await withDeploymentStage('circuit-register-applicant', () =>
+    session.contract.callTx.registerApplicant(enrollmentLeaf),
+  );
+
+  return result.public;
+};
+
+/**
+ * Submits this browser's own application.
+ *
+ * The commitment randomness is derived from `(roundId, applicantSecret)`
+ * rather than drawn at random, matching the CLI's `deriveApplicationNonce` —
+ * see that function in `@aequira/sdk` for why.
+ */
+export const applyToRound = async (session: RoundSession): Promise<FinalizedTxData> => {
+  const current = await readPrivateState(session);
+  const applicantSecret = Uint8Array.from(current.applicantSecret);
+  const nonce = await deriveApplicationNonce(session.roundId, applicantSecret);
+
+  const result = await withDeploymentStage('circuit-apply', () =>
+    session.contract.callTx.apply(nonce),
   );
 
   return result.public;

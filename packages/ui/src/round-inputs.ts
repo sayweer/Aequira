@@ -52,6 +52,9 @@ export const parseApplicationId = (value: string): string =>
 
 export const parseReviewerId = (value: string): string => parseHex32(value, 'a', 'reviewer ID');
 
+export const parseEnrollmentLeaf = (value: string): string =>
+  parseHex32(value, 'an', 'enrollment leaf');
+
 export const parseScore = (value: string): number => {
   const trimmed = value.trim();
 
@@ -111,6 +114,29 @@ export const parseEligibilityThresholds = (
     'the minimum grade average, scaled by 100',
     MAX_GPA_SCALED,
   ),
+});
+
+/**
+ * An applicant's own attributes, as `applicantLeaf` and `apply`'s witnesses
+ * take them. Kept separate from `EligibilityThresholds`: these are the private
+ * values measured against those public rules, not the rules themselves.
+ */
+export type ApplicantAttributes = {
+  readonly gpaScaled: bigint;
+  readonly incomeBand: bigint;
+  readonly regionCode: bigint;
+};
+
+export const MAX_REGION_CODE = 255;
+
+export const parseApplicantAttributes = (
+  incomeBand: string,
+  gpaScaled: string,
+  regionCode: string,
+): ApplicantAttributes => ({
+  gpaScaled: parseThreshold(gpaScaled, 'the scaled grade average', MAX_GPA_SCALED),
+  incomeBand: parseThreshold(incomeBand, 'the income band', MAX_INCOME_BAND),
+  regionCode: parseThreshold(regionCode, 'the region code', MAX_REGION_CODE),
 });
 
 export const parseContractAddressInput = (value: string): string => {

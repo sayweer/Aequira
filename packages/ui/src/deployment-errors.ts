@@ -1,8 +1,10 @@
 import { PasswordValidationError, validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 
 export type DeploymentStage =
+  | 'circuit-apply'
   | 'circuit-commit-score'
   | 'circuit-phase-transition'
+  | 'circuit-register-applicant'
   | 'circuit-register-reviewer'
   | 'circuit-reveal-score'
   | 'contract-deployment'
@@ -236,6 +238,34 @@ const CONTRACT_ASSERTION_MESSAGES: readonly (readonly [string, string])[] = [
   [
     'reviewers can only be registered during setup',
     'Reviewers can only be registered while the round is in setup.',
+  ],
+  [
+    'applicants can only be enrolled during setup',
+    'Applicants can only be enrolled while the round is in setup.',
+  ],
+  [
+    'enrollment proof is not for this applicant',
+    'The enrollment proof does not belong to this browser’s applicant identity. Re-enroll so the proof is rebuilt from the current attributes.',
+  ],
+  [
+    'applicant is not enrolled in the round',
+    'This browser’s applicant identity is not enrolled in the round’s applicant tree. Ask the institution to register the enrollment leaf during setup.',
+  ],
+  [
+    'income band is above the eligibility threshold',
+    'The income band exceeds the round’s published eligibility threshold.',
+  ],
+  [
+    'grade average is below the eligibility threshold',
+    'The grade average is below the round’s published eligibility threshold.',
+  ],
+  [
+    'this applicant already applied to the round',
+    'This applicant already submitted an application for this round. The replay nullifier prevents a second one.',
+  ],
+  [
+    'applications can only be submitted while applications are open',
+    'Applications can only be submitted while the round is in the applications-open phase. Refresh the round state and check the current phase.',
   ],
   [
     'scores can only be committed during review',
