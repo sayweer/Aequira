@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  deriveApplicantId,
+  deriveApplicantLeaf,
+  deriveApplicationNonce,
+  deriveApplicationPseudonym,
+  deriveApplyNullifier,
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
@@ -87,6 +92,121 @@ describe('AEQUIRA SDK input validation', () => {
     assert.equal(reviewerId.byteLength, 32);
     assert.deepEqual(deriveReviewerId(secret), reviewerId);
     assert.notDeepEqual(reviewerId, secret);
+  });
+
+  test('derives a deterministic applicant pseudonym without exposing its secret', () => {
+    const secret = new Uint8Array(32).fill(8);
+    const applicantId = deriveApplicantId(secret);
+
+    assert.equal(applicantId.byteLength, 32);
+    assert.deepEqual(deriveApplicantId(secret), applicantId);
+    assert.notDeepEqual(applicantId, secret);
+  });
+});
+
+describe('AEQUIRA SDK applicant value derivation', () => {
+  const roundId = filled(1);
+  const applicantSecret = filled(5);
+  const applicantSalt = filled(6);
+  const nonce = filled(7);
+
+  test('derives an enrollment leaf the same way the applicant device would, without the institution ever holding the secret', () => {
+    const leaf = deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, applicantSalt);
+
+    assert.equal(leaf.byteLength, 32);
+    assert.deepEqual(deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, applicantSalt), leaf);
+    assert.notDeepEqual(leaf, applicantSecret);
+    assert.notDeepEqual(leaf, applicantSalt);
+  });
+
+  test('derives a leaf that changes with any single attribute or the salt', () => {
+    const leaf = deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, applicantSalt);
+
+    assert.notDeepEqual(deriveApplicantLeaf(3n, 350n, 7n, applicantSecret, applicantSalt), leaf);
+    assert.notDeepEqual(deriveApplicantLeaf(2n, 351n, 7n, applicantSecret, applicantSalt), leaf);
+    assert.notDeepEqual(deriveApplicantLeaf(2n, 350n, 8n, applicantSecret, applicantSalt), leaf);
+    assert.notDeepEqual(deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, filled(9)), leaf);
+  });
+
+  test('rejects attributes wider than the circuit accepts', () => {
+    assert.throws(
+      () => deriveApplicantLeaf(256n, 350n, 7n, applicantSecret, applicantSalt),
+      /incomeBand must be between 0 and 255/,
+    );
+    assert.throws(
+      () => deriveApplicantLeaf(2n, 65536n, 7n, applicantSecret, applicantSalt),
+      /gpaScaled must be between 0 and 65535/,
+    );
+    assert.throws(
+      () => deriveApplicantLeaf(2n, 350n, 256n, applicantSecret, applicantSalt),
+      /regionCode must be between 0 and 255/,
+    );
+  });
+
+  test('derives a nullifier that is scoped to the round and the applicant', () => {
+    const nullifier = deriveApplyNullifier(roundId, applicantSecret);
+
+    assert.equal(nullifier.byteLength, 32);
+    assert.deepEqual(deriveApplyNullifier(roundId, applicantSecret), nullifier);
+    assert.notDeepEqual(deriveApplyNullifier(filled(9), applicantSecret), nullifier);
+    assert.notDeepEqual(deriveApplyNullifier(roundId, filled(9)), nullifier);
+  });
+
+  test('derives a pseudonym that does not equal the nullifier and changes with the nonce', () => {
+    const pseudonym = deriveApplicationPseudonym(roundId, applicantSecret, nonce);
+
+    assert.equal(pseudonym.byteLength, 32);
+    assert.notDeepEqual(pseudonym, deriveApplyNullifier(roundId, applicantSecret));
+    assert.notDeepEqual(deriveApplicationPseudonym(roundId, applicantSecret, filled(9)), pseudonym);
+  });
+});
+
+describe('AEQUIRA SDK apply nonce derivation', () => {
+  const roundId = filled(1);
+  const applicantSecretA = filled(5);
+  const applicantSecretB = filled(6);
+
+  test('derives a 32-byte nonce', async () => {
+    assert.equal((await deriveApplicationNonce(roundId, applicantSecretA)).byteLength, 32);
+  });
+
+  test('derives the same nonce again, so a future claim can reproduce the pseudonym', async () => {
+    assert.deepEqual(
+      await deriveApplicationNonce(roundId, applicantSecretA),
+      await deriveApplicationNonce(roundId, applicantSecretA),
+    );
+  });
+
+  test('derives a different nonce per round and per applicant', async () => {
+    const nonce = await deriveApplicationNonce(roundId, applicantSecretA);
+
+    assert.notDeepEqual(await deriveApplicationNonce(filled(9), applicantSecretA), nonce);
+    assert.notDeepEqual(await deriveApplicationNonce(roundId, applicantSecretB), nonce);
+  });
+
+  test('never returns the applicant secret or the round ID verbatim', async () => {
+    const nonce = await deriveApplicationNonce(roundId, applicantSecretA);
+
+    assert.notDeepEqual(nonce, applicantSecretA);
+    assert.notDeepEqual(nonce, roundId);
+  });
+
+  test('does not mutate its inputs', async () => {
+    const secret = filled(5);
+    await deriveApplicationNonce(roundId, secret);
+
+    assert.deepEqual(secret, filled(5));
+  });
+
+  test('rejects inputs that are not 32 bytes', async () => {
+    await assert.rejects(
+      () => deriveApplicationNonce(bytes(31), applicantSecretA),
+      /roundId must contain exactly 32 bytes/,
+    );
+    await assert.rejects(
+      () => deriveApplicationNonce(roundId, bytes(33)),
+      /applicantSecret must contain exactly 32 bytes/,
+    );
   });
 });
 

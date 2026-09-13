@@ -259,3 +259,95 @@ export const deriveScoreSalt = async (
     input.fill(0);
   }
 };
+
+export const deriveApplicantId = (applicantSecret: Uint8Array): Uint8Array => {
+  assertBytes32('applicantSecret', applicantSecret);
+  return Uint8Array.from(pureCircuits.applicantId(applicantSecret));
+};
+
+/**
+ * Computes the enrollment commitment the same way the applicant's own device
+ * does: locally, from attributes and a secret that never leave it. The
+ * institution never sees anything but the resulting leaf, which it hands to
+ * `registerApplicant` — there is no separate path that builds the same leaf
+ * from an `applicantId` alone, because the generated circuit always re-derives
+ * `applicantId` from `secret` itself.
+ */
+export const deriveApplicantLeaf = (
+  incomeBand: bigint,
+  gpaScaled: bigint,
+  regionCode: bigint,
+  applicantSecret: Uint8Array,
+  applicantSalt: Uint8Array,
+): Uint8Array => {
+  assertBytes32('applicantSecret', applicantSecret);
+  assertBytes32('applicantSalt', applicantSalt);
+  assertUintRange('incomeBand', incomeBand, MAX_UINT8);
+  assertUintRange('gpaScaled', gpaScaled, MAX_UINT16);
+  assertUintRange('regionCode', regionCode, MAX_UINT8);
+
+  return Uint8Array.from(
+    pureCircuits.applicantLeaf(incomeBand, gpaScaled, regionCode, applicantSecret, applicantSalt),
+  );
+};
+
+export const deriveApplyNullifier = (
+  roundId: Uint8Array,
+  applicantSecret: Uint8Array,
+): Uint8Array => {
+  assertBytes32('roundId', roundId);
+  assertBytes32('applicantSecret', applicantSecret);
+  return Uint8Array.from(pureCircuits.applyNullifier(roundId, applicantSecret));
+};
+
+export const deriveApplicationPseudonym = (
+  roundId: Uint8Array,
+  applicantSecret: Uint8Array,
+  nonce: Uint8Array,
+): Uint8Array => {
+  assertBytes32('roundId', roundId);
+  assertBytes32('applicantSecret', applicantSecret);
+  assertBytes32('nonce', nonce);
+  return Uint8Array.from(pureCircuits.applicationPseudonym(roundId, applicantSecret, nonce));
+};
+
+const APPLY_NONCE_DOMAIN = 'aequira:apply-nonce:v1';
+
+/**
+ * Derives `apply`'s commitment randomness deterministically instead of
+ * drawing it at random.
+ *
+ * `apply` is nullifier-gated to once per round per applicant, so there is no
+ * multi-application collision to avoid the way `deriveScoreSalt` avoids one.
+ * The nonce still needs to be reproducible without adding a new
+ * `AequiraPrivateState` field, though: a future `claim` circuit recomputes the
+ * same `applicationPseudonym` from `(roundId, applicantSecret, nonce)` alone,
+ * so whatever nonce `apply` used has to be derivable again later rather than
+ * remembered out of band.
+ *
+ *   nonce = SHA-256("aequira:apply-nonce:v1" || roundId || applicantSecret)
+ *
+ * It stays secret for the same reason `deriveScoreSalt`'s salt does: it is
+ * seeded with 256 bits of applicant secret that only this applicant holds.
+ */
+export const deriveApplicationNonce = async (
+  roundId: Uint8Array,
+  applicantSecret: Uint8Array,
+): Promise<Uint8Array> => {
+  assertBytes32('roundId', roundId);
+  assertBytes32('applicantSecret', applicantSecret);
+
+  const domain = new TextEncoder().encode(APPLY_NONCE_DOMAIN);
+  const input = new Uint8Array(domain.length + BYTE_LENGTH * 2);
+
+  input.set(domain, 0);
+  input.set(roundId, domain.length);
+  input.set(applicantSecret, domain.length + BYTE_LENGTH);
+
+  try {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', input));
+  } finally {
+    // The buffer held the applicant secret in the clear.
+    input.fill(0);
+  }
+};
