@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AEQUIRA_PRIVATE_STATE_ID, deriveScoreSalt } from '@aequira/sdk';
+import {
+  AEQUIRA_PRIVATE_STATE_ID,
+  deriveApplicantLeaf,
+  deriveApplicationNonce,
+  deriveScoreSalt,
+} from '@aequira/sdk';
 import {
   sampleContractAddress,
   sampleSigningKey,
@@ -16,6 +21,7 @@ import {
   DeploymentBackupError,
   DustRegistrationCleanupError,
   EncryptedPrivateStateStore,
+  EnrollmentBackupError,
   FinalizedCallBackupError,
   loadCliConfig,
   getWalletVaultPath,
@@ -29,12 +35,15 @@ import {
   redactErrorMessage,
   readRuntimeSecrets,
   readWalletSeed,
+  runApplyCommand,
   runCommitScoreCommand,
   runDeployCommand,
   runDoctor,
+  runEnrollApplicantCommand,
   runFundingStatusCommand,
   runJoinCommand,
   runPhaseCommand,
+  runRegisterApplicantCommand,
   runRegisterDustCommand,
   runRegisterReviewerCommand,
   runRestoreCommand,
@@ -189,6 +198,53 @@ describe('AEQUIRA CLI configuration', () => {
     assert.throws(
       () => parseCliArguments(['register-reviewer', '--contract-address', sampleContractAddress()]),
       /requires --reviewer-id/,
+    );
+    assert.throws(
+      () =>
+        parseCliArguments(['register-applicant', '--contract-address', sampleContractAddress()]),
+      /requires --enrollment-leaf/,
+    );
+    assert.throws(
+      () => parseCliArguments(['register-applicant', '--enrollment-leaf', 'ab'.repeat(32)]),
+      /requires --contract-address/,
+    );
+    assert.throws(
+      () =>
+        parseCliArguments([
+          'join',
+          '--contract-address',
+          sampleContractAddress(),
+          '--enrollment-leaf',
+          'ab'.repeat(32),
+        ]),
+      /--enrollment-leaf is only valid with register-applicant/,
+    );
+    const applicantContractAddress = sampleContractAddress();
+    assert.deepEqual(
+      parseCliArguments([
+        'register-applicant',
+        '--contract-address',
+        applicantContractAddress,
+        '--enrollment-leaf',
+        'ab'.repeat(32),
+      ]),
+      {
+        command: 'register-applicant',
+        json: false,
+        contractAddress: applicantContractAddress,
+        enrollmentLeaf: 'ab'.repeat(32),
+      },
+    );
+    assert.throws(() => parseCliArguments(['enroll-applicant']), /requires --contract-address/);
+    assert.equal(
+      parseCliArguments(['enroll-applicant', '--contract-address', sampleContractAddress()])
+        .command,
+      'enroll-applicant',
+    );
+    assert.throws(() => parseCliArguments(['apply']), /requires --contract-address/);
+    assert.equal(
+      parseCliArguments(['apply', '--contract-address', sampleContractAddress()]).command,
+      'apply',
     );
     assert.throws(() => parseCliArguments(['restore']), /requires --backup-file/);
     assert.equal(
@@ -1025,6 +1081,42 @@ describe('AEQUIRA CLI administrator commands', () => {
     assert.deepEqual(calls, ['start', 'funding', 'register-reviewer', 'backup', 'close']);
   });
 
+  test('registers an enrollment leaf with the stored admin state', async () => {
+    const { calls, runtime } = createCommandRuntime(validCommandPrivateState());
+    const contractAddress = sampleContractAddress();
+    let capturedLeaf;
+    const result = await runRegisterApplicantCommand(
+      loadCliConfig({ environment: {} }),
+      contractAddress,
+      'ab'.repeat(32),
+      {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(6),
+        }),
+        createRuntime: async () => runtime,
+        joinContract: async () => ({
+          callTx: {
+            registerApplicant: async (leaf) => {
+              calls.push('register-applicant');
+              capturedLeaf = Uint8Array.from(leaf);
+              return { public: finalizedPublicData };
+            },
+          },
+        }),
+        writeBackup: async () => {
+          calls.push('backup');
+          return '/ignored/register-applicant.json';
+        },
+      },
+    );
+
+    assert.deepEqual(Array.from(capturedLeaf), Array(32).fill(0xab));
+    assert.equal(result.transactionId, 'tx-id-1');
+    assert.deepEqual(calls, ['start', 'funding', 'register-applicant', 'backup', 'close']);
+  });
+
   test('maps each phase command to its exact contract circuit', async () => {
     const cases = [
       ['open-applications', 'openApplications'],
@@ -1058,6 +1150,184 @@ describe('AEQUIRA CLI administrator commands', () => {
 
       assert.deepEqual(calls, ['start', 'funding', circuit, 'backup', 'close']);
     }
+  });
+});
+
+describe('AEQUIRA CLI applicant commands', () => {
+  const roundId = new Uint8Array(32).fill(6);
+  const enrollPrompts = {
+    incomeBandPrompt: 'Income band (0-255): ',
+    gpaScaledPrompt: 'Scaled grade average (0-65535): ',
+    regionCodePrompt: 'Region code (0-255): ',
+  };
+
+  test('enrolls an applicant by computing the leaf locally, never sending attributes or the secret', async () => {
+    const privateState = privateStateFixture({
+      applicantIncomeBand: 0n,
+      applicantGpaScaled: 0n,
+      applicantRegionCode: 0n,
+    });
+    const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
+    const contractAddress = sampleContractAddress();
+    const promptedValues = ['2', '350', '7'];
+    let promptIndex = 0;
+
+    const result = await runEnrollApplicantCommand(
+      loadCliConfig({ environment: {} }),
+      contractAddress,
+      enrollPrompts,
+      {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(6),
+        }),
+        promptSecret: async () => promptedValues[promptIndex++],
+        createRuntime: async () => runtime,
+        writeBackup: async () => {
+          calls.push('backup');
+          return '/ignored/enroll-applicant.json';
+        },
+      },
+    );
+
+    const expectedLeaf = deriveApplicantLeaf(
+      2n,
+      350n,
+      7n,
+      privateState.applicantSecret,
+      privateState.applicantSalt,
+    );
+
+    assert.equal(result.enrollmentLeaf, Buffer.from(expectedLeaf).toString('hex'));
+    assert.equal(result.backupPath, '/ignored/enroll-applicant.json');
+    assert.equal(getStoredPrivateState().applicantIncomeBand, 2n);
+    assert.equal(getStoredPrivateState().applicantGpaScaled, 350n);
+    assert.equal(getStoredPrivateState().applicantRegionCode, 7n);
+    assert.deepEqual(
+      Array.from(getStoredPrivateState().applicantSalt),
+      Array.from(privateState.applicantSalt),
+    );
+    assert.deepEqual(calls, ['start', 'set-private-state', 'backup', 'close']);
+  });
+
+  test('does not enroll without local private state', async () => {
+    const { calls, runtime } = createCommandRuntime();
+    const contractAddress = sampleContractAddress();
+
+    await assert.rejects(
+      runEnrollApplicantCommand(
+        loadCliConfig({ environment: {} }),
+        contractAddress,
+        enrollPrompts,
+        {
+          runPrerequisiteChecks: async () => readyChecks,
+          readSecrets: async () => ({
+            privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+            walletSeed: new Uint8Array(32).fill(9),
+          }),
+          promptSecret: async () => '2',
+          createRuntime: async () => runtime,
+        },
+      ),
+      /run join before submitting a contract call/,
+    );
+    assert.equal(calls.at(-1), 'close');
+  });
+
+  test('preserves enrollment identity when backup creation fails', async () => {
+    const privateState = privateStateFixture();
+    const { runtime } = createCommandRuntime(privateState);
+    const contractAddress = sampleContractAddress();
+
+    await assert.rejects(
+      runEnrollApplicantCommand(
+        loadCliConfig({ environment: {} }),
+        contractAddress,
+        enrollPrompts,
+        {
+          runPrerequisiteChecks: async () => readyChecks,
+          readSecrets: async () => ({
+            privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+            walletSeed: new Uint8Array(32).fill(9),
+          }),
+          promptSecret: async () => '2',
+          createRuntime: async () => runtime,
+          writeBackup: async () => {
+            throw new Error('/local/private-state/backup failed');
+          },
+        },
+      ),
+      (error) =>
+        error instanceof EnrollmentBackupError &&
+        error.message.includes('Preserve the private-state directory') &&
+        !error.message.includes('/local/private-state'),
+    );
+  });
+
+  test('submits an application deriving the nonce from the round and the applicant secret', async () => {
+    const privateState = privateStateFixture();
+    const { calls, runtime } = createCommandRuntime(privateState);
+    const contractAddress = sampleContractAddress();
+    let capturedNonce;
+
+    const result = await runApplyCommand(loadCliConfig({ environment: {} }), contractAddress, {
+      runPrerequisiteChecks: async () => readyChecks,
+      readSecrets: async () => ({
+        privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+        walletSeed: new Uint8Array(32).fill(7),
+      }),
+      createRuntime: async () => runtime,
+      readRoundId: async () => roundId,
+      joinContract: async () => ({
+        callTx: {
+          apply: async (submittedNonce) => {
+            calls.push('apply');
+            capturedNonce = Uint8Array.from(submittedNonce);
+            return { public: finalizedPublicData };
+          },
+        },
+      }),
+      writeBackup: async () => {
+        calls.push('backup');
+        return '/ignored/apply.json';
+      },
+    });
+
+    assert.equal(result.transactionId, 'tx-id-1');
+    assert.deepEqual(
+      Array.from(capturedNonce),
+      Array.from(await deriveApplicationNonce(roundId, privateState.applicantSecret)),
+    );
+    assert.deepEqual(calls, ['start', 'funding', 'apply', 'backup', 'close']);
+  });
+
+  test('does not submit an application without local private state', async () => {
+    const { calls, runtime } = createCommandRuntime();
+    const contractAddress = sampleContractAddress();
+
+    await assert.rejects(
+      runApplyCommand(loadCliConfig({ environment: {} }), contractAddress, {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(9),
+        }),
+        createRuntime: async () => runtime,
+        readRoundId: async () => roundId,
+        joinContract: async () => ({
+          callTx: {
+            apply: async () => {
+              calls.push('must-not-submit');
+              return { public: finalizedPublicData };
+            },
+          },
+        }),
+      }),
+      /run join before submitting a contract call/,
+    );
+    assert.equal(calls.includes('must-not-submit'), false);
+    assert.equal(calls.at(-1), 'close');
   });
 });
 

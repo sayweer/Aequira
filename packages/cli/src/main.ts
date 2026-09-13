@@ -2,11 +2,14 @@
 
 import { parseCliArguments } from './arguments.js';
 import {
+  runApplyCommand,
   runCommitScoreCommand,
   runDeployCommand,
+  runEnrollApplicantCommand,
   runFundingStatusCommand,
   runJoinCommand,
   runPhaseCommand,
+  runRegisterApplicantCommand,
   runRegisterDustCommand,
   runRegisterReviewerCommand,
   runRestoreCommand,
@@ -31,15 +34,21 @@ Usage:
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
   aequira register-reviewer --contract-address ADDRESS --reviewer-id 64_HEX [--network preview|preprod] [--json]
+  aequira enroll-applicant --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira register-applicant --contract-address ADDRESS --enrollment-leaf 64_HEX [--network preview|preprod] [--json]
   aequira open-applications --contract-address ADDRESS [--network preview|preprod] [--json]
+  aequira apply --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira open-review --contract-address ADDRESS [--network preview|preprod] [--json]
-  aequira open-reveal --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira commit-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
+  aequira open-reveal --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
 wallet-create stores a new Wallet SDK seed in an encrypted, local-only vault.
 Wallet and private-state commands require an interactive TTY for masked secret entry.
+enroll-applicant prompts for income band, scaled grade average and region code,
+computes the enrollment leaf locally, and never sends the attributes or the
+applicant secret to register-applicant — only the resulting leaf is handed over.
 `;
 
 const write = (value: string): void => {
@@ -180,6 +189,59 @@ const main = async (): Promise<void> => {
     }
 
     const result = await runRegisterReviewerCommand(config, args.contractAddress, args.reviewerId);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (args.command === 'register-applicant') {
+    if (args.contractAddress === undefined || args.enrollmentLeaf === undefined) {
+      throw new Error('register-applicant requires --contract-address and --enrollment-leaf');
+    }
+
+    const result = await runRegisterApplicantCommand(
+      config,
+      args.contractAddress,
+      args.enrollmentLeaf,
+    );
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (args.command === 'enroll-applicant') {
+    if (args.contractAddress === undefined) {
+      throw new Error('enroll-applicant requires --contract-address');
+    }
+
+    const result = await runEnrollApplicantCommand(config, args.contractAddress, {
+      incomeBandPrompt: 'Income band (0-255): ',
+      gpaScaledPrompt: 'Scaled grade average (0-65535): ',
+      regionCodePrompt: 'Region code (0-255): ',
+    });
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      write(
+        'Hand enrollmentLeaf to the institution for register-applicant. It discloses nothing about the attributes or the applicant secret behind it.',
+      );
+      writeBackupReminder();
+    }
+    return;
+  }
+
+  if (args.command === 'apply') {
+    if (args.contractAddress === undefined) {
+      throw new Error('apply requires --contract-address');
+    }
+
+    const result = await runApplyCommand(config, args.contractAddress);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {

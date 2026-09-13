@@ -4,6 +4,9 @@ import {
   AEQUIRA_PRIVATE_STATE_ID,
   createAequiraPrivateState,
   deployAequira,
+  deriveApplicantId,
+  deriveApplicantLeaf,
+  deriveApplicationNonce,
   deriveReviewerId,
   deriveScoreSalt,
   joinAequira,
@@ -165,10 +168,12 @@ export type DeployCommandResult = {
 };
 
 export type AequiraCallName =
+  | 'apply'
   | 'commitScore'
   | 'openApplications'
   | 'openReveal'
   | 'openReview'
+  | 'registerApplicant'
   | 'registerReviewer'
   | 'revealScore';
 
@@ -179,6 +184,19 @@ export class DeploymentBackupError extends Error {
   constructor(contractAddress: ContractAddress, cause: unknown) {
     super(
       `Contract deployed at ${contractAddress}, but encrypted backup creation failed. Do not deploy again; preserve the private-state directory and repair the backup locally.`,
+      { cause },
+    );
+    this.contractAddress = contractAddress;
+  }
+}
+
+export class EnrollmentBackupError extends Error {
+  override readonly name = 'EnrollmentBackupError';
+  readonly contractAddress: ContractAddress;
+
+  constructor(contractAddress: ContractAddress, cause: unknown) {
+    super(
+      `Enrollment attributes were saved locally for ${contractAddress}, but encrypted backup creation failed. Preserve the private-state directory and repair the backup before re-enrolling with different attributes — losing this local store would permanently orphan whatever leaf the institution already registered.`,
       { cause },
     );
     this.contractAddress = contractAddress;
@@ -850,6 +868,198 @@ export const runRegisterReviewerCommand = async (
     (contract) => contract.callTx.registerReviewer(reviewerId),
     dependencies,
   );
+};
+
+export const runRegisterApplicantCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  enrollmentLeafHex: string,
+  dependencies: CommandDependencies = {},
+): Promise<TransactionCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const enrollmentLeaf = parseBytes32('enrollment leaf', enrollmentLeafHex);
+
+  return runExistingPrivateStateCall(
+    config,
+    contractAddress,
+    'registerApplicant',
+    (contract) => contract.callTx.registerApplicant(enrollmentLeaf),
+    dependencies,
+  );
+};
+
+export type EnrollApplicantCommandResult = {
+  readonly applicantId: string;
+  readonly backupPath: string;
+  readonly contractAddress: ContractAddress;
+  readonly enrollmentLeaf: string;
+};
+
+/**
+ * Computes the enrollment leaf locally, the same way `apply`'s own witness
+ * later recomputes it, and never sends the applicant's attributes or secret
+ * anywhere. The institution only ever receives the resulting `enrollmentLeaf`
+ * to pass to `register-applicant` — see `deriveApplicantLeaf` in
+ * `@aequira/sdk` for why there is no alternative path that builds the same
+ * leaf from an ID instead of the raw attributes and secret.
+ *
+ * Requires local private state to already exist for this contract (run `join`
+ * first): enrollment reuses the `applicantSecret` and `applicantSalt` that
+ * `join` already drew at random, rather than generating new ones, so this
+ * command can be re-run safely if the attributes were entered incorrectly —
+ * the same secret and salt keep working the next time `apply` needs them.
+ */
+export const runEnrollApplicantCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  attributePrompts: {
+    readonly gpaScaledPrompt: string;
+    readonly incomeBandPrompt: string;
+    readonly regionCodePrompt: string;
+  },
+  dependencies: CommandDependencies = {},
+): Promise<EnrollApplicantCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
+  assertDoctorReady(checks);
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
+  let currentPrivateState: AequiraPrivateState | undefined;
+  let nextPrivateState: AequiraPrivateState | undefined;
+  let runtime: AequiraRuntime | undefined;
+
+  try {
+    const incomeBand = parseThreshold(
+      'Income band',
+      await promptSecret(attributePrompts.incomeBandPrompt),
+      255n,
+    );
+    const gpaScaled = parseThreshold(
+      'Scaled grade average',
+      await promptSecret(attributePrompts.gpaScaledPrompt),
+      65535n,
+    );
+    const regionCode = parseThreshold(
+      'Region code',
+      await promptSecret(attributePrompts.regionCodePrompt),
+      255n,
+    );
+    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+      config,
+      privateStatePassword: secrets.privateStatePassword,
+      walletSeed: secrets.walletSeed,
+    });
+    await runtime.wallet.start();
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
+    const applicantSecret = Uint8Array.from(currentPrivateState.applicantSecret);
+    const applicantSalt = Uint8Array.from(currentPrivateState.applicantSalt);
+    nextPrivateState = createAequiraPrivateState({
+      ...currentPrivateState,
+      applicantSecret,
+      applicantSalt,
+      applicantIncomeBand: incomeBand,
+      applicantGpaScaled: gpaScaled,
+      applicantRegionCode: regionCode,
+    });
+    await setAequiraPrivateState(runtime.providers, contractAddress, nextPrivateState);
+
+    let backupPath: string;
+
+    try {
+      backupPath = await (dependencies.writeBackup ?? writeRuntimeBackup)({
+        authenticationPassword: secrets.privateStatePassword,
+        config,
+        contractAddress,
+        privateStateProvider: runtime.providers.privateStateProvider,
+      });
+    } catch (error) {
+      throw new EnrollmentBackupError(contractAddress, error);
+    }
+
+    return {
+      applicantId: Buffer.from(deriveApplicantId(applicantSecret)).toString('hex'),
+      backupPath,
+      contractAddress,
+      enrollmentLeaf: Buffer.from(
+        deriveApplicantLeaf(incomeBand, gpaScaled, regionCode, applicantSecret, applicantSalt),
+      ).toString('hex'),
+    };
+  } finally {
+    if (currentPrivateState !== undefined) {
+      clearPrivateState(currentPrivateState);
+    }
+    if (nextPrivateState !== undefined) {
+      clearPrivateState(nextPrivateState);
+    }
+
+    secrets.walletSeed.fill(0);
+    await runtime?.close();
+  }
+};
+
+/**
+ * Submits the applicant's own application.
+ *
+ * The commitment randomness (`nonce`) is derived from `(roundId,
+ * applicantSecret)` rather than drawn at random, so a future `claim` circuit
+ * can reproduce the same `applicationPseudonym` without this CLI having to
+ * persist a new private-state field for it — see `deriveApplicationNonce` in
+ * `@aequira/sdk`.
+ */
+export const runApplyCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  dependencies: CommandDependencies = {},
+): Promise<TransactionCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
+  assertDoctorReady(checks);
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
+  let currentPrivateState: AequiraPrivateState | undefined;
+  let runtime: AequiraRuntime | undefined;
+
+  try {
+    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+      config,
+      privateStatePassword: secrets.privateStatePassword,
+      walletSeed: secrets.walletSeed,
+    });
+    await runtime.wallet.start();
+    await assertWalletHasDust(runtime.wallet);
+
+    const contract = await joinForCall(
+      runtime,
+      contractAddress,
+      dependencies.joinContract ?? joinAequira,
+    );
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
+    const applicantSecret = Uint8Array.from(currentPrivateState.applicantSecret);
+    const roundId = await (dependencies.readRoundId ?? readRoundId)(
+      runtime.providers,
+      contractAddress,
+    );
+    const nonce = await deriveApplicationNonce(roundId, applicantSecret);
+    const txData = await contract.callTx.apply(nonce);
+    const backupPath = await writeFinalizedCallBackup(
+      secrets.privateStatePassword,
+      config,
+      contractAddress,
+      'apply',
+      txData.public,
+      runtime,
+      dependencies.writeBackup ?? writeRuntimeBackup,
+    );
+
+    return toTransactionCommandResult(contractAddress, txData.public, backupPath);
+  } finally {
+    if (currentPrivateState !== undefined) {
+      clearPrivateState(currentPrivateState);
+    }
+
+    secrets.walletSeed.fill(0);
+    await runtime?.close();
+  }
 };
 
 export type PhaseCommand = 'open-applications' | 'open-reveal' | 'open-review';

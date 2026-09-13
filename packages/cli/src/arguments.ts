@@ -1,16 +1,19 @@
 import type { AequiraNetwork } from './config.js';
 
 export const COMMANDS = [
+  'apply',
   'commit-score',
   'config',
   'deploy',
   'doctor',
+  'enroll-applicant',
   'funding-status',
   'help',
   'join',
   'open-applications',
   'open-reveal',
   'open-review',
+  'register-applicant',
   'register-dust',
   'register-reviewer',
   'restore',
@@ -26,6 +29,7 @@ export type CliArguments = {
   readonly backupFile?: string;
   readonly command: CliCommand;
   readonly contractAddress?: string;
+  readonly enrollmentLeaf?: string;
   readonly json: boolean;
   readonly maxIncomeBand?: string;
   readonly minGpaScaled?: string;
@@ -76,6 +80,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   let applicationId: string | undefined;
   let backupFile: string | undefined;
   let contractAddress: string | undefined;
+  let enrollmentLeaf: string | undefined;
   let maxIncomeBand: string | undefined;
   let minGpaScaled: string | undefined;
   let network: AequiraNetwork | undefined;
@@ -150,6 +155,12 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
+    if (option === '--enrollment-leaf') {
+      enrollmentLeaf = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
     if (option === '--backup-file') {
       backupFile = readOptionValue(options, index, option);
       index += 1;
@@ -160,11 +171,14 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   }
 
   const requiresContractAddress =
+    commandValue === 'apply' ||
     commandValue === 'commit-score' ||
+    commandValue === 'enroll-applicant' ||
     commandValue === 'join' ||
     commandValue === 'open-applications' ||
     commandValue === 'open-reveal' ||
     commandValue === 'open-review' ||
+    commandValue === 'register-applicant' ||
     commandValue === 'register-reviewer' ||
     commandValue === 'reveal-score';
   const requiresApplicationId = commandValue === 'commit-score' || commandValue === 'reveal-score';
@@ -217,6 +231,14 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--reviewer-id is only valid with register-reviewer');
   }
 
+  if (commandValue === 'register-applicant' && enrollmentLeaf === undefined) {
+    throw new Error('register-applicant requires --enrollment-leaf');
+  }
+
+  if (commandValue !== 'register-applicant' && enrollmentLeaf !== undefined) {
+    throw new Error('--enrollment-leaf is only valid with register-applicant');
+  }
+
   if (commandValue === 'restore' && backupFile === undefined) {
     throw new Error('restore requires --backup-file');
   }
@@ -231,6 +253,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     ...(applicationId === undefined ? {} : { applicationId }),
     ...(backupFile === undefined ? {} : { backupFile }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
+    ...(enrollmentLeaf === undefined ? {} : { enrollmentLeaf }),
     ...(maxIncomeBand === undefined ? {} : { maxIncomeBand }),
     ...(minGpaScaled === undefined ? {} : { minGpaScaled }),
     ...(network === undefined ? {} : { network }),
