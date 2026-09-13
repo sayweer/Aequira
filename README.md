@@ -13,7 +13,7 @@ and the tally is publicly verifiable once it is opened.
 | **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                                                            |
 | **Network**          | Midnight Preprod                                                                                                                   |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 145 (`pnpm test`)                                                                                                                  |
+| **Tests**            | 163 (`pnpm test`)                                                                                                                  |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -219,7 +219,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 145 tests: 23 contract, 17 sdk, 67 ui, 38 cli
+pnpm test            # 163 tests: 23 contract, 29 sdk, 67 ui, 44 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -255,7 +255,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 145 tests, no proof server needed
+pnpm test                   # 163 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -359,7 +359,10 @@ pnpm --filter @aequira/cli doctor
 pnpm --filter @aequira/cli start deploy --network preprod --round-id ROUND_ID_64_HEX
 pnpm --filter @aequira/cli start join   --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start register-reviewer  --network preprod --contract-address ADDRESS --reviewer-id ID_64_HEX
+pnpm --filter @aequira/cli start enroll-applicant   --network preprod --contract-address ADDRESS
+pnpm --filter @aequira/cli start register-applicant --network preprod --contract-address ADDRESS --enrollment-leaf LEAF_64_HEX
 pnpm --filter @aequira/cli start open-applications --network preprod --contract-address ADDRESS
+pnpm --filter @aequira/cli start apply             --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start open-review       --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start commit-score      --network preprod --contract-address ADDRESS --application-id ID_64_HEX
 pnpm --filter @aequira/cli start open-reveal       --network preprod --contract-address ADDRESS
@@ -375,6 +378,17 @@ works after committing a different one. Deploy and state-changing calls stop
 before building a transaction when the synchronized Dust balance is zero.
 Successful calls write an encrypted, password-authenticated backup that `restore`
 can read back into an empty store without overwriting anything.
+
+`enroll-applicant` also prompts (income band, scaled grade average, region code)
+rather than taking them as arguments, for the same reason the score is prompted:
+they are private applicant data. It computes the enrollment leaf entirely
+locally — via the same `applicantLeaf` derivation `apply` itself uses to find its
+Merkle path — and prints only the resulting `enrollmentLeaf` and `applicantId`
+for the institution to pass to `register-applicant`. Neither the attributes nor
+the applicant secret behind them are ever transmitted. `apply`'s commitment
+randomness is likewise derived from `(roundId, applicantSecret)` rather than
+drawn at random, so a future claim can reproduce it without a new private-state
+field (see `deriveApplicationNonce` in `packages/sdk/src/client.ts`).
 
 ---
 
@@ -416,7 +430,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
-| Passing test suite                         | 145 tests, `pnpm test`; CI `verify` job                                          |
+| Passing test suite                         | 163 tests, `pnpm test`; CI `verify` job                                          |
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
@@ -436,7 +450,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 145                                                                  |
+| Minimum 3 tests passing              | 163                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |
