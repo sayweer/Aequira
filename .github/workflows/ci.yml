@@ -30,8 +30,14 @@ jobs:
           sh "$RUNNER_TEMP/compact-installer.sh"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Pinned rather than "latest": the tracked src/managed/ output, and the
+      # exact syntax recorded in SYNTAX.md, were verified against this
+      # compiler/language-version pair. An unpinned update silently drifts CI
+      # onto a newer compiler that can require a higher language_version and
+      # change generated circuit signatures (e.g. sync -> async), breaking the
+      # build without any local change to explain why.
       - name: Update the toolchain
-        run: compact update
+        run: compact update 0.31.1
 
       - name: Report versions
         run: |
