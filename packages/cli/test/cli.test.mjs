@@ -16,6 +16,7 @@ import {
   sampleSigningKey,
 } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 import { unshieldedToken } from '@midnight-ntwrk/midnight-js-protocol/ledger';
+import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk';
 import {
   AequiraWalletProvider,
   DeploymentBackupError,
@@ -218,6 +219,26 @@ describe('AEQUIRA CLI configuration', () => {
           'ab'.repeat(32),
         ]),
       /--enrollment-leaf is only valid with register-applicant/,
+    );
+    assert.deepEqual(
+      parseCliArguments([
+        'register-dust',
+        '--dust-address',
+        'mn_dust_preprod1wwccv5pa0c4flstyp0vwtyn68s046p4cujfhegh36evqu77yjylj5ke532j',
+      ]),
+      {
+        command: 'register-dust',
+        dustAddress: 'mn_dust_preprod1wwccv5pa0c4flstyp0vwtyn68s046p4cujfhegh36evqu77yjylj5ke532j',
+        json: false,
+      },
+    );
+    assert.throws(
+      () => parseCliArguments(['funding-status', '--dust-address', 'mn_dust_preprod1abc']),
+      /--dust-address is only valid with register-dust/,
+    );
+    assert.throws(
+      () => parseCliArguments(['register-dust', '--dust-address']),
+      /--dust-address requires a value/,
     );
     const applicantContractAddress = sampleContractAddress();
     assert.deepEqual(
@@ -1716,6 +1737,7 @@ describe('AEQUIRA CLI wallet provider', () => {
     let registrationStopCalls = 0;
     const registration = await runRegisterDustCommand(
       loadCliConfig({ environment: {}, network: 'preview' }),
+      undefined,
       {
         readWalletSeed: async () => registrationSeed,
         createWalletProvider: async () => ({
@@ -1735,6 +1757,7 @@ describe('AEQUIRA CLI wallet provider', () => {
 
     assert.deepEqual(registration, {
       dustBalanceBefore: '0',
+      dustReceiverAddress: null,
       network: 'preview',
       registeredUtxos: 2,
       submitted: true,
@@ -1748,19 +1771,23 @@ describe('AEQUIRA CLI wallet provider', () => {
     );
 
     const noOpSeed = new Uint8Array(32).fill(15);
-    const noOpRegistration = await runRegisterDustCommand(loadCliConfig({ environment: {} }), {
-      readWalletSeed: async () => noOpSeed,
-      createWalletProvider: async () => ({
-        accountId: 'mn_addr_preprod1public',
-        start: async () => undefined,
-        registerAvailableNightForDust: async () => ({
-          dustBalanceBefore: 29n,
-          registeredUtxos: 0,
-          transactionId: null,
+    const noOpRegistration = await runRegisterDustCommand(
+      loadCliConfig({ environment: {} }),
+      undefined,
+      {
+        readWalletSeed: async () => noOpSeed,
+        createWalletProvider: async () => ({
+          accountId: 'mn_addr_preprod1public',
+          start: async () => undefined,
+          registerAvailableNightForDust: async () => ({
+            dustBalanceBefore: 29n,
+            registeredUtxos: 0,
+            transactionId: null,
+          }),
+          stop: async () => undefined,
         }),
-        stop: async () => undefined,
-      }),
-    });
+      },
+    );
     assert.equal(noOpRegistration.submitted, false);
     assert.equal(noOpRegistration.transactionId, null);
     assert.equal(
@@ -1770,7 +1797,7 @@ describe('AEQUIRA CLI wallet provider', () => {
 
     const cleanupFailureSeed = new Uint8Array(32).fill(14);
     await assert.rejects(
-      runRegisterDustCommand(loadCliConfig({ environment: {} }), {
+      runRegisterDustCommand(loadCliConfig({ environment: {} }), undefined, {
         readWalletSeed: async () => cleanupFailureSeed,
         createWalletProvider: async () => ({
           accountId: 'mn_addr_preprod1public',
@@ -1794,6 +1821,71 @@ describe('AEQUIRA CLI wallet provider', () => {
       cleanupFailureSeed.every((byte) => byte === 0),
       true,
     );
+  });
+
+  test('register-dust directs generated Dust to another wallet', async () => {
+    // A wallet holding zero Dust cannot pay for its own registration, so NIGHT owned by the CLI
+    // wallet generates Dust straight into the other wallet's Dust address.
+    const receiver = 'mn_dust_preprod1wwccv5pa0c4flstyp0vwtyn68s046p4cujfhegh36evqu77yjylj5ke532j';
+    const seed = new Uint8Array(32).fill(21);
+    let receivedAddress;
+
+    const result = await runRegisterDustCommand(
+      loadCliConfig({ environment: {}, network: 'preprod' }),
+      receiver,
+      {
+        readWalletSeed: async () => seed,
+        createWalletProvider: async () => ({
+          accountId: 'mn_addr_preprod1public',
+          start: async () => undefined,
+          registerAvailableNightForDust: async (dustReceiverAddress) => {
+            receivedAddress = dustReceiverAddress;
+            return { dustBalanceBefore: 0n, registeredUtxos: 1, transactionId: 'dust-tx-2' };
+          },
+          stop: async () => undefined,
+        }),
+      },
+    );
+
+    assert.equal(result.dustReceiverAddress, receiver);
+    assert.equal(result.submitted, true);
+    // The provider is handed a decoded address, never the raw string.
+    assert.equal(typeof receivedAddress?.data, 'bigint');
+    assert.equal(MidnightBech32m.encode('preprod', receivedAddress).asString(), receiver);
+    assert.equal(
+      seed.every((byte) => byte === 0),
+      true,
+    );
+  });
+
+  test('register-dust rejects a Dust address from another network or kind', async () => {
+    const rejects = async (value, expected) => {
+      let walletCreated = false;
+
+      await assert.rejects(
+        runRegisterDustCommand(loadCliConfig({ environment: {}, network: 'preprod' }), value, {
+          readWalletSeed: async () => new Uint8Array(32).fill(22),
+          createWalletProvider: async () => {
+            walletCreated = true;
+            throw new Error('wallet must not be created for an invalid Dust address');
+          },
+        }),
+        (error) => expected.test(error.message),
+      );
+
+      // The address is validated before any wallet, secret or network access happens.
+      assert.equal(walletCreated, false);
+    };
+
+    await rejects(
+      'mn_dust_preview1wwccv5pa0c4flstyp0vwtyn68s046p4cujfhegh36evqu77yjylj5h8yzhj',
+      /preprod/,
+    );
+    await rejects(
+      'mn_addr_preprod1mmg7knvhzvmedvndxxtlh26hxmyp8weewj6rc5zhfej07sk05m4qe9jxjd',
+      /Expected a Dust address/,
+    );
+    await rejects('not-an-address', /not valid bech32m/);
   });
 
   test('cleans up funding-status secrets and wallet after synchronization failure', async () => {

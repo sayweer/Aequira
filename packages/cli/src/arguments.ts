@@ -29,6 +29,7 @@ export type CliArguments = {
   readonly backupFile?: string;
   readonly command: CliCommand;
   readonly contractAddress?: string;
+  readonly dustAddress?: string;
   readonly enrollmentLeaf?: string;
   readonly json: boolean;
   readonly maxIncomeBand?: string;
@@ -80,6 +81,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   let applicationId: string | undefined;
   let backupFile: string | undefined;
   let contractAddress: string | undefined;
+  let dustAddress: string | undefined;
   let enrollmentLeaf: string | undefined;
   let maxIncomeBand: string | undefined;
   let minGpaScaled: string | undefined;
@@ -151,6 +153,12 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
 
     if (option === '--reviewer-id') {
       reviewerId = readOptionValue(options, index, option);
+      index += 1;
+      continue;
+    }
+
+    if (option === '--dust-address') {
+      dustAddress = readOptionValue(options, index, option);
       index += 1;
       continue;
     }
@@ -239,6 +247,10 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--enrollment-leaf is only valid with register-applicant');
   }
 
+  if (commandValue !== 'register-dust' && dustAddress !== undefined) {
+    throw new Error('--dust-address is only valid with register-dust');
+  }
+
   if (commandValue === 'restore' && backupFile === undefined) {
     throw new Error('restore requires --backup-file');
   }
@@ -253,6 +265,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     ...(applicationId === undefined ? {} : { applicationId }),
     ...(backupFile === undefined ? {} : { backupFile }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
+    ...(dustAddress === undefined ? {} : { dustAddress }),
     ...(enrollmentLeaf === undefined ? {} : { enrollmentLeaf }),
     ...(maxIncomeBand === undefined ? {} : { maxIncomeBand }),
     ...(minGpaScaled === undefined ? {} : { minGpaScaled }),

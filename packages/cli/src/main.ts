@@ -29,7 +29,7 @@ Usage:
   aequira wallet-create [--network preview|preprod] [--json]
   aequira wallet-address [--network preview|preprod] [--json]
   aequira funding-status [--network preview|preprod] [--json]
-  aequira register-dust [--network preview|preprod] [--json]
+  aequira register-dust [--dust-address <mn_dust_...>] [--network preview|preprod] [--json]
   aequira deploy --round-id 64_HEX --max-income-band 0-255 --min-gpa-scaled 0-65535 [--network preview|preprod] [--json]
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
@@ -104,7 +104,7 @@ const main = async (): Promise<void> => {
   }
 
   if (args.command === 'register-dust') {
-    const result = await runRegisterDustCommand(config);
+    const result = await runRegisterDustCommand(config, args.dustAddress);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
     return;
   }

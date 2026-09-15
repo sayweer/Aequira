@@ -15,8 +15,10 @@ import {
 import { ttlOneHour } from '@midnight-ntwrk/midnight-js-utils';
 import {
   createKeystore,
+  DustAddress,
   DustWallet,
   HDWallet,
+  MidnightBech32m,
   InMemoryTransactionHistoryStorage,
   mergeWalletEntries,
   PublicKey,
@@ -140,6 +142,29 @@ export type DustRegistrationResult = {
   readonly dustBalanceBefore: bigint;
   readonly registeredUtxos: number;
   readonly transactionId: string | null;
+};
+
+/**
+ * Decodes a bech32m Dust address and rejects one that belongs to a different network, so a
+ * mistyped or cross-network receiver is caught before any transaction reaches the chain.
+ */
+export const parseDustAddress = (
+  value: string,
+  networkId: CliConfig['walletNetworkId'],
+): DustAddress => {
+  let parsed: MidnightBech32m;
+
+  try {
+    parsed = MidnightBech32m.parse(value);
+  } catch (error) {
+    throw new Error(`Dust address is not valid bech32m: ${(error as Error).message}`);
+  }
+
+  if (parsed.type !== 'dust') {
+    throw new Error(`Expected a Dust address, got a "${parsed.type}" address`);
+  }
+
+  return parsed.decode(DustAddress, networkId);
 };
 
 const clearDerivedWalletKeys = (keys: DerivedWalletKeys): void => {
@@ -306,7 +331,16 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
     };
   }
 
-  async registerAvailableNightForDust(): Promise<DustRegistrationResult> {
+  /**
+   * Registers this wallet's unregistered NIGHT for Dust generation.
+   *
+   * `dustReceiverAddress` directs the generated Dust to another wallet, which is how a wallet
+   * holding zero Dust is bootstrapped: NIGHT owned by this key may generate Dust into any Dust
+   * address, and only this key's signature is required.
+   */
+  async registerAvailableNightForDust(
+    dustReceiverAddress?: DustAddress,
+  ): Promise<DustRegistrationResult> {
     if (!this.#started) {
       throw new Error('Wallet must be started before registering NIGHT for Dust generation');
     }
@@ -330,7 +364,7 @@ export class AequiraWalletProvider implements MidnightProvider, WalletProvider {
       unregisteredNightUtxos,
       this.getUnshieldedKeystore().getPublicKey(),
       (payload) => this.getUnshieldedKeystore().signData(payload),
-      state.dust.address,
+      dustReceiverAddress ?? state.dust.address,
     );
     const transaction = await this.wallet.finalizeRecipe(recipe);
     const transactionId = await this.wallet.submitTransaction(transaction);

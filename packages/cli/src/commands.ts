@@ -36,7 +36,11 @@ import {
   type RuntimeSecrets,
   type SecretPrompt,
 } from './secret-input.js';
-import { AequiraWalletProvider, deriveUnshieldedAddress } from './wallet-provider.js';
+import {
+  AequiraWalletProvider,
+  deriveUnshieldedAddress,
+  parseDustAddress,
+} from './wallet-provider.js';
 import { writeWalletVault } from './wallet-vault.js';
 
 const BYTES32_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
@@ -360,6 +364,8 @@ export type FundingStatusCommandResult = {
 
 export type RegisterDustCommandResult = {
   readonly dustBalanceBefore: string;
+  /** The wallet receiving the generated Dust, or `null` when it is this wallet itself. */
+  readonly dustReceiverAddress: string | null;
   readonly network: CliConfig['network'];
   readonly registeredUtxos: number;
   readonly submitted: boolean;
@@ -464,8 +470,13 @@ export const runFundingStatusCommand = async (
 
 export const runRegisterDustCommand = async (
   config: CliConfig,
+  dustAddressValue: string | undefined,
   dependencies: CommandDependencies = {},
 ): Promise<RegisterDustCommandResult> => {
+  const dustReceiverAddress =
+    dustAddressValue === undefined
+      ? undefined
+      : parseDustAddress(dustAddressValue, config.walletNetworkId);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
   const walletSeed = await (dependencies.readWalletSeed ?? readWalletSeed)(config, promptSecret);
   let wallet: AequiraWalletProvider | undefined;
@@ -477,11 +488,12 @@ export const runRegisterDustCommand = async (
       walletSeed,
     );
     await wallet.start();
-    const registration = await wallet.registerAvailableNightForDust();
+    const registration = await wallet.registerAvailableNightForDust(dustReceiverAddress);
     submittedTransactionId = registration.transactionId ?? undefined;
 
     return {
       dustBalanceBefore: registration.dustBalanceBefore.toString(),
+      dustReceiverAddress: dustAddressValue ?? null,
       network: config.network,
       registeredUtxos: registration.registeredUtxos,
       submitted: registration.transactionId !== null,

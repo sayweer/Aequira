@@ -13,7 +13,7 @@ and the tally is publicly verifiable once it is opened.
 | **Preprod contract** | `3f390d6c373fcc40223dd0539e1ae1b73de7904ad55adf7db7e0de83823ad7c2`                                                                 |
 | **Network**          | Midnight Preprod                                                                                                                   |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 166 (`pnpm test`)                                                                                                                  |
+| **Tests**            | 168 (`pnpm test`)                                                                                                                  |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -219,7 +219,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 166 tests: 23 contract, 29 sdk, 70 ui, 44 cli
+pnpm test            # 168 tests: 23 contract, 29 sdk, 70 ui, 46 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -255,7 +255,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 166 tests, no proof server needed
+pnpm test                   # 168 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -435,7 +435,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
-| Passing test suite                         | 166 tests, `pnpm test`; CI `verify` job                                          |
+| Passing test suite                         | 168 tests, `pnpm test`; CI `verify` job                                          |
 | Deployed to Preprod with a visible address | table at the top of this file                                                    |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
@@ -455,7 +455,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 166                                                                  |
+| Minimum 3 tests passing              | 168                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |
