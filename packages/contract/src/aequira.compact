@@ -61,7 +61,9 @@ export ledger applyNullifiers: Set<Bytes<32>>;
 // The pseudonyms of the accepted applications. `commitScore` deliberately does
 // not check membership here: proving that a score belongs to a listed
 // application would mean disclosing which application is being scored, which is
-// exactly what the sealed review phase exists to hide.
+// exactly what the sealed review phase exists to hide. `revealScore` does check
+// it, once the application ID is public anyway, so a commitment to anything
+// other than a real application can never be opened into the tally.
 export ledger applications: Set<Bytes<32>>;
 
 constructor(initialRoundId: Bytes<32>,
@@ -141,14 +143,15 @@ export circuit applicantId(secret: Bytes<32>): Bytes<32> {
 }
 
 // The enrollment commitment. The institution computes it from the attributes it
-// verified plus the applicant's `applicantId`, which is all the applicant ever
-// hands over: the secret behind it never leaves their device, which is what
-// stops the institution from recognizing the application it later sees.
-export circuit applicantLeaf(
+// verified, a salt it draws, and the applicant's `applicantId`, which is all the
+// applicant ever hands over: the secret behind it never leaves their device,
+// which is what stops the institution from recognizing the application it later
+// sees. The institution then gives the applicant the attributes and salt it used.
+export circuit enrollmentLeaf(
                  incomeBand: Uint<8>,
                  gpaScaled: Uint<16>,
                  regionCode: Uint<8>,
-                 secret: Bytes<32>,
+                 id: Bytes<32>,
                  salt: Bytes<32>
                  ): Bytes<32> {
   return persistentCommit<Vector<5, Bytes<32>>>(
@@ -156,9 +159,21 @@ export circuit applicantLeaf(
             incomeBand as Bytes<32>,
             gpaScaled as Bytes<32>,
             regionCode as Bytes<32>,
-            applicantId(secret)],
+            id],
            salt
            );
+}
+
+// The same commitment as the applicant reconstructs it, from their own secret.
+// Delegating keeps the two encodings identical by construction.
+export circuit applicantLeaf(
+                 incomeBand: Uint<8>,
+                 gpaScaled: Uint<16>,
+                 regionCode: Uint<8>,
+                 secret: Bytes<32>,
+                 salt: Bytes<32>
+                 ): Bytes<32> {
+  return enrollmentLeaf(incomeBand, gpaScaled, regionCode, applicantId(secret), salt);
 }
 
 export circuit applyNullifier(activeRoundId: Bytes<32>, secret: Bytes<32>): Bytes<32> {
@@ -313,6 +328,7 @@ export circuit revealScore(applicationId: Bytes<32>): [] {
   scoreCommitments.remove(publicCommitment);
 
   const publicApplicationId = disclose(applicationId); // Safe: application identifiers are public pseudonyms by design.
+  assert(applications.member(publicApplicationId), "Application is not in this round");
   if (!scoreSums.member(publicApplicationId)) {
     scoreSums.insertDefault(publicApplicationId);
   }

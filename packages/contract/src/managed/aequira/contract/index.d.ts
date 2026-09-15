@@ -74,6 +74,11 @@ export type PureCircuits = {
                   secret_0: Uint8Array,
                   salt_0: Uint8Array): Uint8Array;
   applicantId(secret_0: Uint8Array): Uint8Array;
+  enrollmentLeaf(incomeBand_0: bigint,
+                 gpaScaled_0: bigint,
+                 regionCode_0: bigint,
+                 id_0: Uint8Array,
+                 salt_0: Uint8Array): Uint8Array;
   applicantLeaf(incomeBand_0: bigint,
                 gpaScaled_0: bigint,
                 regionCode_0: bigint,
@@ -101,6 +106,12 @@ export type Circuits<PS> = {
                   secret_0: Uint8Array,
                   salt_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   applicantId(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  enrollmentLeaf(context: __compactRuntime.CircuitContext<PS>,
+                 incomeBand_0: bigint,
+                 gpaScaled_0: bigint,
+                 regionCode_0: bigint,
+                 id_0: Uint8Array,
+                 salt_0: Uint8Array): __compactRuntime.CircuitResults<PS, Uint8Array>;
   applicantLeaf(context: __compactRuntime.CircuitContext<PS>,
                 incomeBand_0: bigint,
                 gpaScaled_0: bigint,

@@ -89,12 +89,56 @@ class AequiraSimulator {
   }
 }
 
+// The applicant half of a round. The institution verifies the attributes and
+// enrolls the commitment they open to; the applicant keeps the secret, so the
+// leaf on chain is the only thing the institution ever holds about them.
+const APPLICANT_INCOME_BAND = 2n;
+const APPLICANT_GPA_SCALED = 350n;
+const APPLICANT_REGION_CODE = 7n;
+
+const APPLICANT = {
+  incomeBand: APPLICANT_INCOME_BAND,
+  gpaScaled: APPLICANT_GPA_SCALED,
+  regionCode: APPLICANT_REGION_CODE,
+  secret: bytes(66),
+  salt: bytes(88),
+  nonce: bytes(99),
+};
+
+// The institution's side of enrollment: verified attributes, its own salt, and
+// the applicant's public ID — never the secret behind that ID.
+const enroll = (simulator, { incomeBand, gpaScaled, regionCode, secret, salt }) => {
+  simulator.call(
+    'registerApplicant',
+    pureCircuits.enrollmentLeaf(
+      incomeBand,
+      gpaScaled,
+      regionCode,
+      pureCircuits.applicantId(secret),
+      salt,
+    ),
+  );
+};
+
+// Switches the shared private state to one applicant and submits their
+// application, returning the public pseudonym reviewers score.
+const submitApplication = (simulator, roundId, applicant) => {
+  simulator.setPrivateState({
+    applicantSecret: applicant.secret,
+    applicantIncomeBand: applicant.incomeBand,
+    applicantGpaScaled: applicant.gpaScaled,
+    applicantRegionCode: applicant.regionCode,
+    applicantSalt: applicant.salt,
+  });
+  simulator.call('apply', applicant.nonce);
+  return pureCircuits.applicationPseudonym(roundId, applicant.secret, applicant.nonce);
+};
+
 const setupReview = ({ score = 87n, witnessOverrides, alsoRegister = [] } = {}) => {
   const roundId = bytes(11);
   const adminSecret = bytes(22);
   const reviewerSecret = bytes(33);
   const scoreSalt = bytes(44);
-  const applicationId = bytes(55);
   const simulator = new AequiraSimulator({
     roundId,
     adminSecret,
@@ -110,7 +154,9 @@ const setupReview = ({ score = 87n, witnessOverrides, alsoRegister = [] } = {}) 
     simulator.call('registerReviewer', pureCircuits.reviewerId(otherSecret));
   }
 
+  enroll(simulator, APPLICANT);
   simulator.call('openApplications');
+  const applicationId = submitApplication(simulator, roundId, APPLICANT);
   simulator.call('openReview');
 
   return {
@@ -370,7 +416,12 @@ describe('AEQUIRA L1 contract', () => {
     });
     simulator.call('registerReviewer', pureCircuits.reviewerId(context.reviewerSecret));
     simulator.call('registerReviewer', secondReviewerId);
+    enroll(simulator, APPLICANT);
     simulator.call('openApplications');
+    assert.deepEqual(
+      submitApplication(simulator, context.roundId, APPLICANT),
+      context.applicationId,
+    );
     simulator.call('openReview');
     simulator.call('commitScore', context.applicationId);
 
@@ -418,8 +469,24 @@ describe('AEQUIRA L1 contract', () => {
     const roundId = bytes(11);
     const adminSecret = bytes(22);
     const reviewerSecret = bytes(33);
-    const applicationA = bytes(55);
-    const applicationB = bytes(56);
+    const otherApplicant = {
+      incomeBand: 1n,
+      gpaScaled: 400n,
+      regionCode: 5n,
+      secret: bytes(77),
+      salt: bytes(78),
+      nonce: bytes(79),
+    };
+    const applicationA = pureCircuits.applicationPseudonym(
+      roundId,
+      APPLICANT.secret,
+      APPLICANT.nonce,
+    );
+    const applicationB = pureCircuits.applicationPseudonym(
+      roundId,
+      otherApplicant.secret,
+      otherApplicant.nonce,
+    );
     const scoreA = 87n;
     const scoreB = 42n;
     const saltA = await deriveScoreSalt(roundId, applicationA, reviewerSecret);
@@ -435,7 +502,11 @@ describe('AEQUIRA L1 contract', () => {
       scoreSalt: saltA,
     });
     simulator.call('registerReviewer', pureCircuits.reviewerId(reviewerSecret));
+    enroll(simulator, APPLICANT);
+    enroll(simulator, otherApplicant);
     simulator.call('openApplications');
+    submitApplication(simulator, roundId, APPLICANT);
+    submitApplication(simulator, roundId, otherApplicant);
     simulator.call('openReview');
 
     simulator.call('commitScore', applicationA);
@@ -459,19 +530,69 @@ describe('AEQUIRA L1 contract', () => {
     assert.equal(ledger.revealedCounts.lookup(applicationA).read(), 1n);
     assert.equal(ledger.revealedCounts.lookup(applicationB).read(), 1n);
   });
-  // The applicant half of a round. The institution verifies the attributes and
-  // enrolls the commitment they open to; the applicant keeps the secret, so the
-  // leaf on chain is the only thing the institution ever holds about them.
-  const APPLICANT_INCOME_BAND = 2n;
-  const APPLICANT_GPA_SCALED = 350n;
-  const APPLICANT_REGION_CODE = 7n;
 
-  const enroll = (simulator, { incomeBand, gpaScaled, regionCode, secret, salt }) => {
-    simulator.call(
-      'registerApplicant',
-      pureCircuits.applicantLeaf(incomeBand, gpaScaled, regionCode, secret, salt),
+  test('refuses to open a score for an application that was never submitted', () => {
+    // commitScore cannot check the application without naming it, so a
+    // commitment to an invented ID is accepted — but it must never reach the
+    // published tally.
+    const context = setupReview({ score: 64n });
+    const inventedApplicationId = bytes(55);
+    context.simulator.call('commitScore', inventedApplicationId);
+    context.simulator.call('openReveal');
+
+    assert.throws(
+      () => context.simulator.call('revealScore', inventedApplicationId),
+      /Application is not in this round/,
     );
-  };
+
+    const publicState = context.simulator.getLedger();
+    assert.equal(publicState.scoreSums.member(inventedApplicationId), false);
+    assert.equal(publicState.revealedCounts.member(inventedApplicationId), false);
+    assert.equal(
+      publicState.scoreCommitments.member(
+        pureCircuits.scoreCommitment(
+          context.roundId,
+          inventedApplicationId,
+          context.score,
+          context.reviewerSecret,
+          context.scoreSalt,
+        ),
+      ),
+      true,
+    );
+  });
+
+  test('builds the same enrollment leaf from the applicant ID as from the secret', () => {
+    // The institution only ever holds the public applicant ID; the applicant
+    // rebuilds the leaf from their secret inside apply. Both must agree exactly.
+    assert.deepEqual(
+      pureCircuits.enrollmentLeaf(
+        APPLICANT.incomeBand,
+        APPLICANT.gpaScaled,
+        APPLICANT.regionCode,
+        pureCircuits.applicantId(APPLICANT.secret),
+        APPLICANT.salt,
+      ),
+      pureCircuits.applicantLeaf(
+        APPLICANT.incomeBand,
+        APPLICANT.gpaScaled,
+        APPLICANT.regionCode,
+        APPLICANT.secret,
+        APPLICANT.salt,
+      ),
+    );
+  });
+
+  test('refuses an applicant who claims attributes other than the ones enrolled', () => {
+    // The institution enrolled income band 9. A client that swaps in an eligible
+    // figure cannot reopen the institution's commitment, so no path matches.
+    const context = setupApply({ enrolled: false, alsoEnroll: [{ ...APPLICANT, incomeBand: 9n }] });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /This applicant is not enrolled in the round/,
+    );
+  });
 
   const setupApply = ({
     incomeBand = APPLICANT_INCOME_BAND,
