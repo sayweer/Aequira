@@ -29,7 +29,7 @@ import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 
 import { createBrowserProviderSession, type BrowserProviderSession } from './browser-providers.js';
 import { withDeploymentStage } from './deployment-errors.js';
-import { deployNewAequira } from './deployment.js';
+import { createRandomPrivateState, deployNewAequira } from './deployment.js';
 import type { ProofMode } from './proof-mode.js';
 import { bytesToHex, hexToBytes, toRoundView, type RoundView } from './round-format.js';
 import {
@@ -69,19 +69,25 @@ export type ScoreInput = {
   readonly score: number;
 };
 
-const toRoundSession = async (
+const toRoundSession = (
   session: BrowserProviderSession,
   address: ContractAddress,
   contract: FoundAequiraContract,
-): Promise<RoundSession> => ({
+  roundId: Uint8Array,
+): RoundSession => ({
   address,
   close: () => session.close(),
   contract,
   proofMode: session.proofMode,
   providers: session.providers,
-  roundId: await withDeploymentStage('ledger-query', () => readRoundId(session.providers, address)),
+  roundId,
 });
 
+/**
+ * The deployment already knows its round ID. Reading it back from the indexer
+ * right after deploying races the indexer, and losing that race used to report
+ * a failed deployment for a contract that exists, and forget its address.
+ */
 export const deployRound = async (
   connectedApi: ConnectedAPI,
   privateStatePassword: string,
@@ -89,12 +95,12 @@ export const deployRound = async (
 ): Promise<RoundSession> => {
   const deployment = await deployNewAequira(connectedApi, privateStatePassword, thresholds);
 
-  try {
-    return await toRoundSession(deployment.session, deployment.address, deployment.contract);
-  } catch (error) {
-    await deployment.session.close();
-    throw error;
-  }
+  return toRoundSession(
+    deployment.session,
+    deployment.address,
+    deployment.contract,
+    deployment.roundId,
+  );
 };
 
 export const joinRound = async (
@@ -106,13 +112,26 @@ export const joinRound = async (
   const session = await createBrowserProviderSession(connectedApi, privateStatePassword);
 
   try {
-    // No initialPrivateState: joining must never overwrite the encrypted secrets
-    // this browser already holds for the round.
+    const existing = await withDeploymentStage('private-state', async () => {
+      session.providers.privateStateProvider.setContractAddress(address);
+      return session.providers.privateStateProvider.get(AEQUIRA_PRIVATE_STATE_ID);
+    });
+    // A browser that holds secrets for this round joins with them untouched. A
+    // browser new to the round gets fresh ones; without them the contract library
+    // refuses to join at all.
     const contract = await withDeploymentStage('contract-join', () =>
-      joinAequira(session.providers, { contractAddress: address }),
+      joinAequira(
+        session.providers,
+        existing === null
+          ? { contractAddress: address, initialPrivateState: createRandomPrivateState() }
+          : { contractAddress: address },
+      ),
+    );
+    const roundId = await withDeploymentStage('ledger-query', () =>
+      readRoundId(session.providers, address),
     );
 
-    return await toRoundSession(session, address, contract);
+    return toRoundSession(session, address, contract, roundId);
   } catch (error) {
     await session.close();
     throw error;

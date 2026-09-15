@@ -18,15 +18,19 @@ export const ContractPanel = ({ round }: ContractPanelProps) => {
   const opening = round.busy === 'deploy' || round.busy === 'join';
   const isOpen = round.address !== null;
 
-  const submit = async (action: 'deploy' | 'join') => {
-    if (action === 'deploy') {
-      await round.deploy(password, confirmation, maxIncomeBand, minGpaScaled);
-    } else {
-      await round.join(password, confirmation, addressInput);
-    }
+  const errorText = round.errorFor(['deploy', 'join']);
 
-    setPassword('');
-    setConfirmation('');
+  const submit = async (action: 'deploy' | 'join') => {
+    const opened =
+      action === 'deploy'
+        ? await round.deploy(password, confirmation, maxIncomeBand, minGpaScaled)
+        : await round.join(password, confirmation, addressInput);
+
+    // Kept on failure, so a retry does not mean typing both passwords again.
+    if (opened) {
+      setPassword('');
+      setConfirmation('');
+    }
   };
 
   return (
@@ -118,10 +122,10 @@ export const ContractPanel = ({ round }: ContractPanelProps) => {
             </label>
           </div>
 
-          {round.error !== null && (
+          {errorText !== null && (
             <StageMessage
               onDismiss={round.dismissError}
-              text={round.error}
+              text={errorText}
               title="This needs attention"
             />
           )}

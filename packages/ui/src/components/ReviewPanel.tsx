@@ -58,10 +58,10 @@ export const ReviewPanel = ({ round }: ReviewPanelProps) => {
         its salted commitment reaches the transaction.
       </p>
 
-      {round.error !== null && (
+      {round.errorFor(['commit', 'reveal']) !== null && (
         <StageMessage
           onDismiss={round.dismissError}
-          text={round.error}
+          text={round.errorFor(['commit', 'reveal'])!}
           title="This needs attention"
         />
       )}

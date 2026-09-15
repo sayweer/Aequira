@@ -72,10 +72,10 @@ export const ApplicantPanel = ({ round }: ApplicantPanelProps) => {
         secret behind them ever leave it — only the resulting leaf, below, is meant to be shared.
       </p>
 
-      {round.error !== null && (
+      {round.errorFor(['enroll', 'apply']) !== null && (
         <StageMessage
           onDismiss={round.dismissError}
-          text={round.error}
+          text={round.errorFor(['enroll', 'apply'])!}
           title="This needs attention"
         />
       )}

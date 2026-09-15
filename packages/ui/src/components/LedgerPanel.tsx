@@ -23,8 +23,10 @@ export const LedgerPanel = ({ round }: LedgerPanelProps) => {
       </div>
 
       {view === null ? (
-        <p className="privacy-note" aria-busy="true">
-          Waiting for the indexer to catch up with this contract…
+        <p className="privacy-note" aria-busy={!round.indexerLagging}>
+          {round.indexerLagging
+            ? 'The indexer has not answered for several attempts. It may be behind or unreachable; this keeps retrying.'
+            : 'Waiting for the indexer to catch up with this contract…'}
         </p>
       ) : (
         <>

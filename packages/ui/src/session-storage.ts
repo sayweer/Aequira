@@ -7,7 +7,9 @@
 // live in the password-encrypted private state provider.
 //
 // Storage is injected rather than read from `window` so this module compiles in
-// the test build.
+// the test build. It is injected as a getter because merely touching
+// `window.localStorage` throws when site data is blocked, and a page that cannot
+// remember a round must still work.
 
 const HEX_32_BYTES = /^[0-9a-f]{64}$/;
 
@@ -45,12 +47,25 @@ const readJsonArray = (raw: string | null): string[] => {
   }
 };
 
-export const createRoundMemoryStore = (storage: StorageLike, network: string): RoundMemoryStore => {
+export const createRoundMemoryStore = (
+  getStorage: () => StorageLike,
+  network: string,
+): RoundMemoryStore => {
   const addressKey = `aequira:${network}:contract-address`;
   const applicationsKey = `aequira:${network}:application-ids`;
 
-  const read = (): RoundMemory => {
+  // Every access is best-effort: storage can be unavailable entirely (a private
+  // window, blocked site data) or full, and remembering is a convenience.
+  const withStorage = <Value>(use: (storage: StorageLike) => Value, fallback: Value): Value => {
     try {
+      return use(getStorage());
+    } catch {
+      return fallback;
+    }
+  };
+
+  const read = (): RoundMemory =>
+    withStorage((storage) => {
       const contractAddress = storage.getItem(addressKey);
 
       return {
@@ -58,11 +73,7 @@ export const createRoundMemoryStore = (storage: StorageLike, network: string): R
         contractAddress:
           contractAddress !== null && contractAddress.length > 0 ? contractAddress : null,
       };
-    } catch {
-      // Storage can be unavailable entirely, for example in a private window.
-      return EMPTY;
-    }
-  };
+    }, EMPTY);
 
   return {
     addApplicationId: (applicationIdHex: string): void => {
@@ -76,18 +87,24 @@ export const createRoundMemoryStore = (storage: StorageLike, network: string): R
         return;
       }
 
-      storage.setItem(applicationsKey, JSON.stringify([...existing, applicationIdHex]));
+      withStorage(
+        (storage) =>
+          storage.setItem(applicationsKey, JSON.stringify([...existing, applicationIdHex])),
+        undefined,
+      );
     },
 
     clear: (): void => {
-      storage.removeItem(addressKey);
-      storage.removeItem(applicationsKey);
+      withStorage((storage) => {
+        storage.removeItem(addressKey);
+        storage.removeItem(applicationsKey);
+      }, undefined);
     },
 
     read,
 
     saveContractAddress: (contractAddress: string): void => {
-      storage.setItem(addressKey, contractAddress);
+      withStorage((storage) => storage.setItem(addressKey, contractAddress), undefined);
     },
   };
 };

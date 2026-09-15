@@ -38,6 +38,8 @@ import { createRoundMemoryStore } from '../session-storage.js';
 import { AEQUIRA_NETWORK_ID } from '../wallet.js';
 
 const LEDGER_POLL_INTERVAL_MS = 4_000;
+/** Consecutive failed reads before the page says the indexer is behind. */
+const LEDGER_FAILURES_BEFORE_LAG = 3;
 
 export type RoundActionName =
   | 'apply'
@@ -50,6 +52,11 @@ export type RoundActionName =
   | 'registerApplicant'
   | 'reveal';
 
+export type RoundError = {
+  readonly action: RoundActionName;
+  readonly message: string;
+};
+
 export type CommittedScore = {
   readonly applicationIdHex: string;
   readonly score: number;
@@ -59,7 +66,9 @@ export type AequiraRound = {
   readonly address: string | null;
   readonly applicantIdHex: string | null;
   readonly busy: RoundActionName | null;
-  readonly error: string | null;
+  readonly error: RoundError | null;
+  /** True once several ledger reads in a row have failed. */
+  readonly indexerLagging: boolean;
   readonly lastEnrollment: EnrollmentResult | null;
   /** The score the user last entered here. It stays in this tab. */
   readonly lastCommitted: CommittedScore | null;
@@ -72,15 +81,19 @@ export type AequiraRound = {
   apply(): Promise<void>;
   clear(): void;
   commit(applicationIdInput: string, scoreInput: string): Promise<void>;
+  /** Resolves true once the round is open. */
   deploy(
     password: string,
     confirmation: string,
     maxIncomeBand: string,
     minGpaScaled: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
   dismissError(): void;
   enroll(incomeBandInput: string, gpaScaledInput: string, regionCodeInput: string): Promise<void>;
-  join(password: string, confirmation: string, addressInput: string): Promise<void>;
+  /** The current error, if it came from one of these actions. */
+  errorFor(actions: readonly RoundActionName[]): string | null;
+  /** Resolves true once the round is open. */
+  join(password: string, confirmation: string, addressInput: string): Promise<boolean>;
   refresh(): Promise<void>;
   registerApplicant(enrollmentLeafInput: string): Promise<void>;
   registerReviewer(reviewerIdInput: string): Promise<void>;
@@ -96,13 +109,17 @@ const toActionErrorMessage = (error: unknown, fallback: (error: unknown) => stri
   error instanceof InputError || error instanceof RangeError ? error.message : fallback(error);
 
 export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound => {
-  const memory = useMemo(() => createRoundMemoryStore(window.localStorage, AEQUIRA_NETWORK_ID), []);
+  const memory = useMemo(
+    () => createRoundMemoryStore(() => window.localStorage, AEQUIRA_NETWORK_ID),
+    [],
+  );
 
   const [address, setAddress] = useState<string | null>(null);
   const [proofMode, setProofMode] = useState<ProofMode | null>(null);
   const [view, setView] = useState<RoundView | null>(null);
+  const [indexerLagging, setIndexerLagging] = useState(false);
   const [busy, setBusy] = useState<RoundActionName | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<RoundError | null>(null);
   const [reviewerIdHex, setReviewerIdHex] = useState<string | null>(null);
   const [applicantIdHex, setApplicantIdHex] = useState<string | null>(null);
   const [lastEnrollment, setLastEnrollment] = useState<EnrollmentResult | null>(null);
@@ -117,15 +134,23 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
 
   const sessionRef = useRef<RoundSession | null>(null);
   const attemptRef = useRef(0);
+  // Render-time `busy` lags a fast second click; this does not.
+  const busyRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
+  const ledgerFailuresRef = useRef(0);
 
   const clear = useCallback(() => {
     attemptRef.current += 1;
+    busyRef.current = false;
+    ledgerFailuresRef.current = 0;
     const session = sessionRef.current;
     sessionRef.current = null;
 
     setAddress(null);
     setProofMode(null);
     setView(null);
+    setIndexerLagging(false);
     setBusy(null);
     setError(null);
     setReviewerIdHex(null);
@@ -145,17 +170,45 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
   // switching the wallet must close it. The cleanup also covers unmount.
   useEffect(() => () => clear(), [clear, connectedApi]);
 
+  // One read at a time, so a slow response can never overwrite a newer one. A
+  // refresh requested mid-read (say, right after a phase change) runs once more
+  // afterwards instead of being dropped until the next poll.
   const refresh = useCallback(async () => {
-    const session = sessionRef.current;
-
-    if (session === null) {
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
       return;
     }
 
+    refreshInFlightRef.current = true;
+
     try {
-      setView(await readRoundState(session, applicationIdHexes));
-    } catch {
-      // The indexer lags behind a fresh deployment; the poll retries.
+      do {
+        refreshQueuedRef.current = false;
+        const session = sessionRef.current;
+
+        if (session === null) {
+          break;
+        }
+
+        try {
+          const nextView = await readRoundState(session, applicationIdHexes);
+
+          // A read that outlived its round must not repaint the next one.
+          if (sessionRef.current === session) {
+            ledgerFailuresRef.current = 0;
+            setIndexerLagging(false);
+            setView(nextView);
+          }
+        } catch {
+          // The indexer lags behind a fresh deployment; the poll retries.
+          if (sessionRef.current === session) {
+            ledgerFailuresRef.current += 1;
+            setIndexerLagging(ledgerFailuresRef.current >= LEDGER_FAILURES_BEFORE_LAG);
+          }
+        }
+      } while (refreshQueuedRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [applicationIdHexes]);
 
@@ -172,10 +225,10 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
 
   /** Adopts a freshly opened session, unless the attempt was superseded. */
   const adoptSession = useCallback(
-    async (session: RoundSession, attempt: number): Promise<void> => {
+    async (session: RoundSession, attempt: number): Promise<boolean> => {
       if (attemptRef.current !== attempt) {
         await session.close();
-        return;
+        return false;
       }
 
       sessionRef.current = session;
@@ -195,77 +248,103 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
       } catch {
         // A missing applicant identity only disables the enrollment display.
       }
+
+      return true;
     },
     [memory],
   );
 
   const openSession = useCallback(
     async (
-      action: RoundActionName,
+      action: 'deploy' | 'join',
       password: string,
       confirmation: string,
       open: (api: ConnectedAPI, password: string) => Promise<RoundSession>,
-    ): Promise<void> => {
-      if (connectedApi === null || busy !== null) {
-        return;
+    ): Promise<boolean> => {
+      if (connectedApi === null || busyRef.current) {
+        return false;
       }
 
       const passwordError = getPrivateStatePasswordError(password, confirmation);
 
       if (passwordError !== null) {
-        setError(passwordError);
-        return;
+        setError({ action, message: passwordError });
+        return false;
       }
 
+      busyRef.current = true;
       setError(null);
       setBusy(action);
       const attempt = attemptRef.current + 1;
       attemptRef.current = attempt;
 
       try {
-        await adoptSession(await open(connectedApi, password), attempt);
+        return await adoptSession(await open(connectedApi, password), attempt);
       } catch (caught) {
         if (attemptRef.current === attempt) {
           setAddress(null);
-          setError(
-            action === 'deploy'
-              ? toDeploymentErrorMessage(caught)
-              : toActionErrorMessage(caught, toCircuitErrorMessage),
-          );
+          setError({
+            action,
+            message:
+              action === 'deploy'
+                ? toDeploymentErrorMessage(caught)
+                : toActionErrorMessage(caught, toCircuitErrorMessage),
+          });
         }
+        return false;
       } finally {
         if (attemptRef.current === attempt) {
+          busyRef.current = false;
           setBusy(null);
         }
       }
     },
-    [adoptSession, busy, connectedApi],
+    [adoptSession, connectedApi],
   );
 
+  /**
+   * Runs one circuit call against the current session. Its result is applied
+   * only if the same round is still open when the call settles: a call that
+   * outlives a disconnect must not write into whatever replaced it.
+   */
   const runCall = useCallback(
-    async (
+    async <Result>(
       action: RoundActionName,
-      call: (session: RoundSession) => Promise<void>,
+      call: (session: RoundSession) => Promise<Result>,
+      onSuccess?: (result: Result) => void,
     ): Promise<void> => {
       const session = sessionRef.current;
 
-      if (session === null || busy !== null) {
+      if (session === null || busyRef.current) {
         return;
       }
 
+      const attempt = attemptRef.current;
+      const isCurrent = () => attemptRef.current === attempt && sessionRef.current === session;
+
+      busyRef.current = true;
       setError(null);
       setBusy(action);
 
       try {
-        await call(session);
-        await refresh();
+        const result = await call(session);
+
+        if (isCurrent()) {
+          onSuccess?.(result);
+          await refresh();
+        }
       } catch (caught) {
-        setError(toActionErrorMessage(caught, toCircuitErrorMessage));
+        if (isCurrent()) {
+          setError({ action, message: toActionErrorMessage(caught, toCircuitErrorMessage) });
+        }
       } finally {
-        setBusy(null);
+        if (isCurrent()) {
+          busyRef.current = false;
+          setBusy(null);
+        }
       }
     },
-    [busy, refresh],
+    [refresh],
   );
 
   const rememberApplicationId = useCallback(
@@ -279,14 +358,9 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
   return {
     address,
     advance: (transition: PhaseTransition) =>
-      runCall('phase', async (session) => {
-        await advancePhase(session, transition);
-      }),
+      runCall('phase', (session) => advancePhase(session, transition)),
 
-    apply: () =>
-      runCall('apply', async (session) => {
-        await applyToRound(session);
-      }),
+    apply: () => runCall('apply', (session) => applyToRound(session)),
 
     applicantIdHex,
     busy,
@@ -299,15 +373,20 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
     }, [clear, memory]),
 
     commit: (applicationIdInput: string, scoreInput: string) =>
-      runCall('commit', async (session) => {
-        const applicationIdHex = parseApplicationId(applicationIdInput);
-        const score = parseScore(scoreInput);
-        const { opening } = await commitScore(session, { applicationIdHex, score });
-
-        rememberApplicationId(applicationIdHex);
-        setLastOpening(opening);
-        setLastCommitted({ applicationIdHex, score });
-      }),
+      runCall(
+        'commit',
+        async (session) => {
+          const applicationIdHex = parseApplicationId(applicationIdInput);
+          const score = parseScore(scoreInput);
+          const { opening } = await commitScore(session, { applicationIdHex, score });
+          return { applicationIdHex, opening, score };
+        },
+        ({ applicationIdHex, opening, score }) => {
+          rememberApplicationId(applicationIdHex);
+          setLastOpening(opening);
+          setLastCommitted({ applicationIdHex, score });
+        },
+      ),
 
     // The thresholds are validated before the session opens: a malformed
     // number is a form error the user can fix, not a deployment failure to be
@@ -323,11 +402,14 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
       try {
         thresholds = parseEligibilityThresholds(maxIncomeBand, minGpaScaled);
       } catch (caught) {
-        setError(toActionErrorMessage(caught, toCircuitErrorMessage));
-        return;
+        setError({
+          action: 'deploy',
+          message: toActionErrorMessage(caught, toCircuitErrorMessage),
+        });
+        return false;
       }
 
-      await openSession('deploy', password, confirmation, (api, secret) =>
+      return openSession('deploy', password, confirmation, (api, secret) =>
         deployRound(api, secret, thresholds),
       );
     },
@@ -335,19 +417,21 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
     dismissError: () => setError(null),
 
     enroll: (incomeBandInput: string, gpaScaledInput: string, regionCodeInput: string) =>
-      runCall('enroll', async (session) => {
-        const enrollment = await enrollApplicantCall(
-          session,
-          incomeBandInput,
-          gpaScaledInput,
-          regionCodeInput,
-        );
-
-        setApplicantIdHex(enrollment.applicantIdHex);
-        setLastEnrollment(enrollment);
-      }),
+      runCall(
+        'enroll',
+        (session) => enrollApplicantCall(session, incomeBandInput, gpaScaledInput, regionCodeInput),
+        (enrollment) => {
+          setApplicantIdHex(enrollment.applicantIdHex);
+          setLastEnrollment(enrollment);
+        },
+      ),
 
     error,
+
+    errorFor: (actions: readonly RoundActionName[]) =>
+      error !== null && actions.includes(error.action) ? error.message : null,
+
+    indexerLagging,
 
     join: (password: string, confirmation: string, addressInput: string) =>
       openSession('join', password, confirmation, (api, secret) =>
@@ -362,32 +446,36 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
     rememberedAddress,
 
     registerApplicant: (enrollmentLeafInput: string) =>
-      runCall('registerApplicant', async (session) => {
-        await registerApplicantCall(session, enrollmentLeafInput);
-      }),
+      runCall('registerApplicant', (session) =>
+        registerApplicantCall(session, enrollmentLeafInput),
+      ),
 
     registerReviewer: (reviewerIdInput: string) =>
-      runCall('register', async (session) => {
-        await registerReviewerCall(session, reviewerIdInput);
-      }),
+      runCall('register', (session) => registerReviewerCall(session, reviewerIdInput)),
 
     reveal: (applicationIdInput: string, scoreInput: string) =>
-      runCall('reveal', async (session) => {
-        const applicationIdHex = parseApplicationId(applicationIdInput);
-        const score = parseScore(scoreInput);
+      runCall(
+        'reveal',
+        async (session) => {
+          const applicationIdHex = parseApplicationId(applicationIdInput);
+          const score = parseScore(scoreInput);
 
-        // Refuse locally rather than failing the contract's assertion and paying
-        // for a proof. The browser can check the opening on its own.
-        if (!(await hasMatchingCommitment(session, { applicationIdHex, score }))) {
-          throw new InputError(
-            'That score does not open the commitment recorded on chain for this application.',
-          );
-        }
+          // Refuse locally rather than failing the contract's assertion and paying
+          // for a proof. The browser can check the opening on its own.
+          if (!(await hasMatchingCommitment(session, { applicationIdHex, score }))) {
+            throw new InputError(
+              'That score does not open the commitment recorded on chain for this application.',
+            );
+          }
 
-        await revealScore(session, { applicationIdHex, score });
-        rememberApplicationId(applicationIdHex);
-        setLastCommitted({ applicationIdHex, score });
-      }),
+          await revealScore(session, { applicationIdHex, score });
+          return { applicationIdHex, score };
+        },
+        ({ applicationIdHex, score }) => {
+          rememberApplicationId(applicationIdHex);
+          setLastCommitted({ applicationIdHex, score });
+        },
+      ),
 
     reviewerIdHex,
     view,

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import type { AequiraRound } from '../hooks/useAequiraRound.js';
 import type { PhaseTransition } from '../round.js';
+import { StageMessage } from './StageMessage.js';
 
 // The contract only allows each transition from one phase, so the button that is
 // offered is derived from the phase rather than always showing all three.
@@ -119,6 +120,14 @@ export const AdminPanel = ({ round }: AdminPanelProps) => {
           </button>
         )}
       </div>
+
+      {round.errorFor(['register', 'registerApplicant', 'phase']) !== null && (
+        <StageMessage
+          onDismiss={round.dismissError}
+          text={round.errorFor(['register', 'registerApplicant', 'phase'])!}
+          title="This needs attention"
+        />
+      )}
 
       {phase !== undefined && phase >= 3 && (
         <p className="privacy-note">
