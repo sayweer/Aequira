@@ -85,11 +85,19 @@ const collectErrorChain = (error: unknown): unknown[] => {
 
   for (let depth = 0; depth < 6 && isRecord(current); depth += 1) {
     chain.push(current);
-    current = current.cause;
+    // Lace forwards wallet SDK failures as an Effect Cause, whose `Fail` variant
+    // carries the error under `failure` rather than `cause`.
+    current = current.cause ?? current.failure;
   }
 
   return chain;
 };
+
+const hasWalletFailureTag = (error: unknown, tag: string): boolean =>
+  collectErrorChain(error).some((current) => isRecord(current) && current._tag === tag);
+
+const WALLET_PROVING_MESSAGE =
+  'Lace could not prove its fee payment. Lace sends that proof to the proof server chosen in Settings → Midnight → Proof Server; if it is Local, start it with pnpm proof-server:up and retry.';
 
 const collectErrorMessages = (error: unknown): string => {
   const messages: string[] = [];
@@ -151,6 +159,9 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   }
   if (connectorErrorCode === 'InternalError') {
     return 'Lace could not process the deployment. Confirm that it is unlocked, synced, and has usable tDUST.';
+  }
+  if (hasWalletFailureTag(error, 'Wallet.Proving')) {
+    return WALLET_PROVING_MESSAGE;
   }
 
   const message = collectErrorMessages(error);
@@ -307,6 +318,9 @@ export const toCircuitErrorMessage = (error: unknown): string => {
   }
   if (connectorErrorCode === 'InternalError') {
     return 'Lace could not process the call. Confirm that it is unlocked, synced, and has usable tDUST.';
+  }
+  if (hasWalletFailureTag(error, 'Wallet.Proving')) {
+    return WALLET_PROVING_MESSAGE;
   }
 
   const message = collectErrorMessages(error);

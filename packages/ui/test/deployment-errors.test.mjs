@@ -74,6 +74,32 @@ test('separates local proving from Lace balancing and submission failures', () =
   );
 });
 
+test('points a Lace fee-proof failure at the proof server instead of tDUST', () => {
+  // The shape Lace forwarded when its configured local proof server was down.
+  const laceProvingFailure = Object.assign(new Error(''), {
+    _id: 'FiberFailure',
+    cause: {
+      _id: 'Cause',
+      _tag: 'Fail',
+      failure: {
+        _tag: 'Wallet.Proving',
+        message: 'Failed to prove transaction',
+        cause: { _tag: 'ClientError', message: 'private prover detail' },
+      },
+    },
+  });
+
+  for (const message of [
+    toDeploymentErrorMessage(new DeploymentStageError('wallet-balancing', laceProvingFailure)),
+    toCircuitErrorMessage(new DeploymentStageError('circuit-commit-score', laceProvingFailure)),
+  ]) {
+    assert.match(message, /could not prove its fee payment/);
+    assert.match(message, /pnpm proof-server:up/);
+    assert.doesNotMatch(message, /tDUST/);
+    assert.doesNotMatch(message, /private prover detail/);
+  }
+});
+
 test('explains each contract assertion a circuit call can fail on', () => {
   const cases = [
     ['Only the round administrator can perform this action', /not the round administrator/],
