@@ -9,6 +9,11 @@ import type { ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 
 import {
+  EnrollmentReceiptError,
+  formatEnrollmentReceipt,
+  parseEnrollmentReceipt,
+} from './enrollment-receipt.js';
+import {
   AEQUIRA_PRIVATE_STATE_ID,
   type AequiraContract,
   type AequiraProviders,
@@ -182,7 +187,7 @@ export const setAequiraPrivateState = async (
 };
 
 export const queryAequiraLedger = async (
-  providers: AequiraProviders,
+  providers: Pick<AequiraProviders, 'publicDataProvider'>,
   contractAddress: ContractAddress,
 ): Promise<Ledger | null> => {
   const contractState = await providers.publicDataProvider.queryContractState(contractAddress);
@@ -198,7 +203,7 @@ export const queryAequiraLedger = async (
  * callers from disagreeing about where it comes from.
  */
 export const readRoundId = async (
-  providers: AequiraProviders,
+  providers: Pick<AequiraProviders, 'publicDataProvider'>,
   contractAddress: ContractAddress,
 ): Promise<Uint8Array> => {
   const ledgerState = await queryAequiraLedger(providers, contractAddress);
@@ -266,12 +271,9 @@ export const deriveApplicantId = (applicantSecret: Uint8Array): Uint8Array => {
 };
 
 /**
- * Computes the enrollment commitment the same way the applicant's own device
- * does: locally, from attributes and a secret that never leave it. The
- * institution never sees anything but the resulting leaf, which it hands to
- * `registerApplicant` — there is no separate path that builds the same leaf
- * from an `applicantId` alone, because the generated circuit always re-derives
- * `applicantId` from `secret` itself.
+ * The enrollment commitment as the applicant reconstructs it, from their own
+ * secret. `apply` rebuilds the same leaf from its witnesses; the institution
+ * builds it from the public applicant ID with {@link deriveEnrollmentLeaf}.
  */
 export const deriveApplicantLeaf = (
   incomeBand: bigint,
@@ -289,6 +291,144 @@ export const deriveApplicantLeaf = (
   return Uint8Array.from(
     pureCircuits.applicantLeaf(incomeBand, gpaScaled, regionCode, applicantSecret, applicantSalt),
   );
+};
+
+/**
+ * The enrollment commitment as the institution computes it: from the
+ * attributes it verified, a salt it drew, and the applicant's public ID. It
+ * never holds the secret behind that ID.
+ */
+export const deriveEnrollmentLeaf = (
+  incomeBand: bigint,
+  gpaScaled: bigint,
+  regionCode: bigint,
+  applicantId: Uint8Array,
+  salt: Uint8Array,
+): Uint8Array => {
+  assertBytes32('applicantId', applicantId);
+  assertBytes32('salt', salt);
+  assertUintRange('incomeBand', incomeBand, MAX_UINT8);
+  assertUintRange('gpaScaled', gpaScaled, MAX_UINT16);
+  assertUintRange('regionCode', regionCode, MAX_UINT8);
+
+  return Uint8Array.from(
+    pureCircuits.enrollmentLeaf(incomeBand, gpaScaled, regionCode, applicantId, salt),
+  );
+};
+
+export const deriveAdminId = (roundId: Uint8Array, adminSecret: Uint8Array): Uint8Array => {
+  assertBytes32('roundId', roundId);
+  assertBytes32('adminSecret', adminSecret);
+  return Uint8Array.from(pureCircuits.adminId(roundId, adminSecret));
+};
+
+const bytesToHex = (value: Uint8Array): string =>
+  Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const isAllZero = (value: Uint8Array): boolean => value.every((byte) => byte === 0);
+
+const hexToBytes = (hex: string): Uint8Array =>
+  Uint8Array.from({ length: hex.length / 2 }, (_, index) =>
+    Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+  );
+
+/**
+ * A freshly created private state holds an all-zero applicant salt until the
+ * institution's receipt is imported. No receipt carries a zero salt.
+ */
+export const hasImportedEnrollment = (privateState: AequiraPrivateState): boolean =>
+  !isAllZero(privateState.applicantSalt);
+
+export type EnrollmentIssue = {
+  readonly roundId: Uint8Array;
+  readonly applicantId: Uint8Array;
+  readonly incomeBand: bigint;
+  readonly gpaScaled: bigint;
+  readonly regionCode: bigint;
+  readonly salt: Uint8Array;
+};
+
+/** The institution's side: the leaf to register and the receipt for the applicant. */
+export const issueEnrollmentReceipt = (
+  issue: EnrollmentIssue,
+): { readonly enrollmentLeaf: Uint8Array; readonly receipt: string } => {
+  assertBytes32('roundId', issue.roundId);
+
+  if (isAllZero(issue.salt)) {
+    throw new RangeError('salt must not be all zeros');
+  }
+
+  const enrollmentLeaf = deriveEnrollmentLeaf(
+    issue.incomeBand,
+    issue.gpaScaled,
+    issue.regionCode,
+    issue.applicantId,
+    issue.salt,
+  );
+
+  return {
+    enrollmentLeaf,
+    receipt: formatEnrollmentReceipt({
+      roundIdHex: bytesToHex(issue.roundId),
+      applicantIdHex: bytesToHex(issue.applicantId),
+      incomeBand: issue.incomeBand,
+      gpaScaled: issue.gpaScaled,
+      regionCode: issue.regionCode,
+      saltHex: bytesToHex(issue.salt),
+      enrollmentLeafHex: bytesToHex(enrollmentLeaf),
+    }),
+  };
+};
+
+export type OpenedEnrollment = {
+  readonly incomeBand: bigint;
+  readonly gpaScaled: bigint;
+  readonly regionCode: bigint;
+  readonly salt: Uint8Array;
+  readonly enrollmentLeaf: Uint8Array;
+};
+
+/**
+ * The applicant's side: checks a receipt against this round and this
+ * applicant's own secret before its values are trusted, so a receipt meant for
+ * someone else, another round, or one mangled in transit is refused up front
+ * instead of failing later inside `apply`.
+ */
+export const openEnrollmentReceipt = (
+  text: string,
+  expected: { readonly roundId: Uint8Array; readonly applicantSecret: Uint8Array },
+): OpenedEnrollment => {
+  const receipt = parseEnrollmentReceipt(text);
+
+  if (receipt.roundIdHex !== bytesToHex(expected.roundId)) {
+    throw new EnrollmentReceiptError('This enrollment receipt is for a different round.');
+  }
+  if (receipt.applicantIdHex !== bytesToHex(deriveApplicantId(expected.applicantSecret))) {
+    throw new EnrollmentReceiptError('This enrollment receipt is for a different applicant.');
+  }
+
+  const salt = hexToBytes(receipt.saltHex);
+  const enrollmentLeaf = deriveApplicantLeaf(
+    receipt.incomeBand,
+    receipt.gpaScaled,
+    receipt.regionCode,
+    expected.applicantSecret,
+    salt,
+  );
+
+  if (bytesToHex(enrollmentLeaf) !== receipt.enrollmentLeafHex) {
+    throw new EnrollmentReceiptError(
+      'This enrollment receipt does not match its leaf. It may have been altered in transit.',
+    );
+  }
+
+  return {
+    incomeBand: receipt.incomeBand,
+    gpaScaled: receipt.gpaScaled,
+    regionCode: receipt.regionCode,
+    salt,
+    enrollmentLeaf,
+  };
 };
 
 export const deriveApplyNullifier = (

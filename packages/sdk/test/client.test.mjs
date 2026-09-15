@@ -2,15 +2,23 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  EnrollmentReceiptError,
+  deriveAdminId,
   deriveApplicantId,
   deriveApplicantLeaf,
   deriveApplicationNonce,
   deriveApplicationPseudonym,
   deriveApplyNullifier,
+  deriveEnrollmentLeaf,
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
   deriveScoreSalt,
+  formatEnrollmentReceipt,
+  hasImportedEnrollment,
+  issueEnrollmentReceipt,
+  openEnrollmentReceipt,
+  parseEnrollmentReceipt,
   validateAequiraPrivateState,
 } from '../dist/index.js';
 
@@ -158,6 +166,110 @@ describe('AEQUIRA SDK applicant value derivation', () => {
     assert.equal(pseudonym.byteLength, 32);
     assert.notDeepEqual(pseudonym, deriveApplyNullifier(roundId, applicantSecret));
     assert.notDeepEqual(deriveApplicationPseudonym(roundId, applicantSecret, filled(9)), pseudonym);
+  });
+});
+
+describe('AEQUIRA SDK enrollment receipts', () => {
+  const roundId = filled(1);
+  const applicantSecret = filled(5);
+  const salt = filled(6);
+  const hex = (value) => Buffer.from(value).toString('hex');
+  const issue = (overrides = {}) =>
+    issueEnrollmentReceipt({
+      roundId,
+      applicantId: deriveApplicantId(applicantSecret),
+      incomeBand: 2n,
+      gpaScaled: 350n,
+      regionCode: 7n,
+      salt,
+      ...overrides,
+    });
+  const replacePart = (receipt, index, value) => {
+    const parts = receipt.split(':');
+    parts[index] = value;
+    return parts.join(':');
+  };
+  // Values a leaked error message would expose.
+  const assertNoPrivateEcho = (fn) => {
+    assert.throws(fn, (error) => {
+      assert.ok(error instanceof EnrollmentReceiptError, `unexpected ${error?.name}`);
+      assert.doesNotMatch(error.message, new RegExp(hex(salt)));
+      assert.doesNotMatch(error.message, /350/);
+      return true;
+    });
+  };
+
+  test('builds the institution leaf from the applicant ID to match the applicant own reconstruction', () => {
+    assert.deepEqual(
+      deriveEnrollmentLeaf(2n, 350n, 7n, deriveApplicantId(applicantSecret), salt),
+      deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, salt),
+    );
+  });
+
+  test('issues a receipt that the enrolled applicant can open', () => {
+    const { enrollmentLeaf, receipt } = issue();
+    const opened = openEnrollmentReceipt(receipt, { roundId, applicantSecret });
+
+    assert.match(receipt, /^aequira-enrollment:v1:/);
+    assert.equal(opened.incomeBand, 2n);
+    assert.equal(opened.gpaScaled, 350n);
+    assert.equal(opened.regionCode, 7n);
+    assert.deepEqual(opened.salt, salt);
+    assert.deepEqual(opened.enrollmentLeaf, enrollmentLeaf);
+  });
+
+  test('round-trips through the text format, tolerating wrapped or padded pastes', () => {
+    const { receipt } = issue();
+    // Split inside the round ID, with the hex fields upper-cased.
+    const wrapped = ` ${receipt.slice(0, 40)}\n  ${receipt.slice(40).toUpperCase()} \n`;
+
+    assert.equal(formatEnrollmentReceipt(parseEnrollmentReceipt(receipt)), receipt);
+    assert.deepEqual(parseEnrollmentReceipt(wrapped), parseEnrollmentReceipt(receipt));
+  });
+
+  test('refuses a receipt for another round, another applicant, or an altered value', () => {
+    const { receipt } = issue();
+
+    assertNoPrivateEcho(() =>
+      openEnrollmentReceipt(receipt, { roundId: filled(2), applicantSecret }),
+    );
+    assertNoPrivateEcho(() =>
+      openEnrollmentReceipt(receipt, { roundId, applicantSecret: filled(9) }),
+    );
+    assertNoPrivateEcho(() =>
+      openEnrollmentReceipt(replacePart(receipt, 4, '1'), { roundId, applicantSecret }),
+    );
+  });
+
+  test('refuses malformed receipts with messages that never echo them', () => {
+    const { receipt } = issue();
+
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(`other:${receipt}`));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(replacePart(receipt, 1, 'v2')));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(`${receipt}:extra`));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(replacePart(receipt, 4, '256')));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(replacePart(receipt, 5, '0350')));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(replacePart(receipt, 7, 'zz')));
+    assertNoPrivateEcho(() => parseEnrollmentReceipt(replacePart(receipt, 7, '0'.repeat(64))));
+  });
+
+  test('refuses to issue a receipt with an empty salt', () => {
+    assert.throws(() => issue({ salt: bytes() }), /salt must not be all zeros/);
+  });
+
+  test('treats an all-zero applicant salt as no receipt imported yet', () => {
+    const state = { applicantSalt: bytes() };
+
+    assert.equal(hasImportedEnrollment(state), false);
+    assert.equal(hasImportedEnrollment({ applicantSalt: salt }), true);
+  });
+
+  test('derives the administrator authority from the round and the admin secret', () => {
+    const adminId = deriveAdminId(roundId, filled(3));
+
+    assert.equal(adminId.byteLength, 32);
+    assert.deepEqual(deriveAdminId(roundId, filled(3)), adminId);
+    assert.notDeepEqual(deriveAdminId(filled(2), filled(3)), adminId);
   });
 });
 
