@@ -93,9 +93,11 @@ const checkHttpService = async (
       signal: AbortSignal.timeout(3_000),
     });
 
+    // Any answer below 500 proves the service is up (a GraphQL endpoint or a
+    // proof server legitimately answers GET with 4xx); a 5xx means it is not.
     return {
       name,
-      ok: true,
+      ok: response.status < 500,
       detail: `${label} responded with HTTP ${response.status}`,
     };
   } catch {

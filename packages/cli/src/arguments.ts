@@ -74,8 +74,10 @@ const readOptionValue = (argv: readonly string[], index: number, option: string)
 export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   const [commandValue = 'help', ...options] = argv;
 
+  // Unrecognized input is never echoed: a mis-pasted mnemonic word or secret
+  // would otherwise land in the terminal and its scrollback.
   if (!COMMANDS.includes(commandValue as CliCommand)) {
-    throw new Error(`Unknown command "${commandValue}"`);
+    throw new Error('Unknown command; run "aequira help" for the list of commands');
   }
 
   let json = false;
@@ -99,9 +101,9 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     }
 
     if (isSensitiveOption(option)) {
-      const [optionName = 'sensitive option'] = option.split('=', 1);
+      const [optionName = ''] = option.split('=', 1);
       throw new Error(
-        `${optionName} is forbidden: secrets must never be passed through command-line arguments`,
+        `${/^--[a-z][a-z0-9-]*$/.test(optionName) ? optionName : `The argument at position ${index + 2}`} is forbidden: secrets must never be passed through command-line arguments`,
       );
     }
 
@@ -176,7 +178,13 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
-    throw new Error(`Unknown option "${option}"`);
+    const [optionName = option] = option.split('=', 1);
+
+    throw new Error(
+      /^--[a-z][a-z0-9-]*$/.test(optionName)
+        ? `Unknown option "${optionName}"`
+        : `Unexpected argument at position ${index + 2}`,
+    );
   }
 
   const requiresContractAddress =

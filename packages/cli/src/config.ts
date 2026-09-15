@@ -63,7 +63,8 @@ const parseNetwork = (value: string | undefined): AequiraNetwork => {
   const network = value ?? 'preprod';
 
   if (!isAequiraNetwork(network)) {
-    throw new Error(`Unsupported network "${network}". Expected one of: ${NETWORKS.join(', ')}`);
+    // The rejected value is not echoed; it may be a secret pasted into the wrong place.
+    throw new Error(`Unsupported network. Expected one of: ${NETWORKS.join(', ')}`);
   }
 
   return network;

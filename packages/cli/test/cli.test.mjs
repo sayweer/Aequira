@@ -208,6 +208,36 @@ describe('AEQUIRA CLI configuration', () => {
     );
   });
 
+  test('never echoes an unrecognized command, argument or network', () => {
+    // A mnemonic word or secret pasted into the wrong place must not reach the terminal.
+    assert.throws(
+      () => parseCliArguments(['abandon', 'ability']),
+      (error) => /Unknown command/.test(error.message) && !error.message.includes('abandon'),
+    );
+    assert.throws(
+      () => parseCliArguments(['doctor', '--unknown-flag=hunter2-value']),
+      (error) =>
+        error.message.includes('--unknown-flag') && !error.message.includes('hunter2-value'),
+    );
+    assert.throws(
+      () => parseCliArguments(['doctor', 'zebra']),
+      (error) =>
+        /Unexpected argument at position 2/.test(error.message) && !error.message.includes('zebra'),
+    );
+    assert.throws(
+      () => parseCliArguments(['doctor', 'zebra-secret-value']),
+      (error) =>
+        /position 2 is forbidden/.test(error.message) &&
+        !error.message.includes('zebra-secret-value'),
+    );
+    assert.throws(
+      () => loadCliConfig({ environment: {}, network: 'not-a-network-secret' }),
+      (error) =>
+        /Unsupported network/.test(error.message) &&
+        !error.message.includes('not-a-network-secret'),
+    );
+  });
+
   test('requires public deploy and join identifiers', () => {
     assert.throws(() => parseCliArguments(['deploy']), /requires --round-id/);
     assert.throws(() => parseCliArguments(['join']), /requires --contract-address/);
@@ -383,6 +413,15 @@ describe('AEQUIRA CLI configuration', () => {
     assert.equal(networkFailure.find(({ name }) => name === 'network-node')?.ok, false);
     assert.equal(networkFailure.find(({ name }) => name === 'indexer')?.ok, true);
     assert.equal(networkFailure.find(({ name }) => name === 'proof-server')?.ok, true);
+
+    // A server that answers with 5xx is reachable but not working.
+    const serverError = await runDoctor(config, {
+      accessFile: async () => undefined,
+      fetchUrl: async (url) => new Response(null, { status: url === config.indexer ? 503 : 200 }),
+      nodeVersion: '24.11.1',
+    });
+    assert.equal(serverError.find(({ name }) => name === 'indexer')?.ok, false);
+    assert.equal(serverError.find(({ name }) => name === 'proof-server')?.ok, true);
   });
 
   test('rejects Node versions below the pinned minimum', async () => {
@@ -773,7 +812,15 @@ const runtimeBackupFixture = (contractAddress = sampleContractAddress()) => ({
   },
 });
 
-const createRestoreRuntime = ({ initialPrivateState = null, initialSigningKey = null } = {}) => {
+// Models the Level provider's import semantics: a signing-key export carries
+// every key of the account, so a store that already holds another round's key
+// conflicts under 'error' and skips it under 'skip'.
+const createRestoreRuntime = ({
+  initialPrivateState = null,
+  initialSigningKey = null,
+  otherRoundKey = false,
+  backupHasTargetKey = true,
+} = {}) => {
   const calls = [];
   let privateState = structuredClone(initialPrivateState);
   let signingKey = initialSigningKey;
@@ -789,13 +836,30 @@ const createRestoreRuntime = ({ initialPrivateState = null, initialSigningKey = 
     },
     importSigningKeys: async (_exportData, options) => {
       calls.push(`import-signing-keys:${options.conflictStrategy}`);
-      signingKey = 'restored-signing-key';
-      return { imported: 1, skipped: 0, overwritten: 0 };
+      if (otherRoundKey && options.conflictStrategy === 'error') {
+        throw new Error('Import conflict: 1 signing key already exists');
+      }
+      if (backupHasTargetKey) {
+        signingKey = 'restored-signing-key';
+      }
+      return {
+        imported: backupHasTargetKey ? 1 : 0,
+        skipped: otherRoundKey ? 1 : 0,
+        overwritten: 0,
+      };
     },
     importPrivateStates: async (_exportData, options) => {
       calls.push(`import-private-states:${options.conflictStrategy}`);
       privateState = validCommandPrivateState();
       return { imported: 1, skipped: 0, overwritten: 0 };
+    },
+    remove: async () => {
+      calls.push('remove-private-state');
+      privateState = null;
+    },
+    removeSigningKey: async () => {
+      calls.push('remove-signing-key');
+      signingKey = null;
     },
   };
   const runtime = {
@@ -979,6 +1043,56 @@ describe('AEQUIRA CLI deployment commands', () => {
     );
   });
 
+  test('keeps the real outcome when the runtime fails to close', async () => {
+    // By the time close runs the contract may already be deployed; reporting a
+    // failure instead would invite a duplicate deployment.
+    const config = loadCliConfig({ environment: {} });
+    const contractAddress = sampleContractAddress();
+    const warnings = [];
+    const failingClose = (runtime) => {
+      runtime.close = async () => {
+        throw new Error('close failed at /local/private-state');
+      };
+      return runtime;
+    };
+    const dependencies = (runtime, overrides = {}) => ({
+      runPrerequisiteChecks: async () => readyChecks,
+      readSecrets: async () => ({
+        privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+        walletSeed: new Uint8Array(32).fill(3),
+      }),
+      createRuntime: async () => failingClose(runtime),
+      deployContract: async () => ({ deployTxData: { public: { contractAddress } } }),
+      writeBackup: async () => '/ignored/backup.json',
+      reportCleanupWarning: (message) => warnings.push(message),
+      ...overrides,
+    });
+
+    const result = await runDeployCommand(
+      config,
+      'ab'.repeat(32),
+      '3',
+      '300',
+      dependencies(createCommandRuntime().runtime),
+    );
+
+    assert.equal(result.contractAddress, contractAddress);
+    assert.equal(warnings.length, 1);
+    assert.doesNotMatch(warnings[0], /\/local\//);
+
+    await assert.rejects(
+      runDeployCommand(
+        config,
+        'ab'.repeat(32),
+        '3',
+        '300',
+        dependencies(createCommandRuntime(null, { dustBalance: 0n }).runtime),
+      ),
+      /run register-dust, then confirm funding-status/,
+    );
+    assert.equal(warnings.length, 2);
+  });
+
   test('joins without overwriting existing private state', async () => {
     const config = loadCliConfig({ environment: {} });
     const existing = validCommandPrivateState();
@@ -1082,15 +1196,16 @@ describe('AEQUIRA CLI backup restoration', () => {
       restoredPrivateStates: 1,
       restoredSigningKeys: 1,
       reviewerId: result.reviewerId,
+      skippedSigningKeys: 0,
     });
     assert.match(result.reviewerId, /^[0-9a-f]{64}$/);
     assert.deepEqual(calls, [
       'set-contract-address',
       'get-private-state',
       'get-signing-key',
-      'import-signing-keys:error',
       'import-private-states:error',
       'get-private-state',
+      'import-signing-keys:skip',
       'get-signing-key',
       'close',
     ]);
@@ -1098,6 +1213,45 @@ describe('AEQUIRA CLI backup restoration', () => {
       walletSeed.every((byte) => byte === 0),
       true,
     );
+  });
+
+  const restoreDependencies = (runtime) => ({
+    readBackup: async () => runtimeBackupFixture(),
+    verifyBackup: async () => undefined,
+    readSecrets: async () => ({
+      privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+      walletSeed: new Uint8Array(32).fill(8),
+    }),
+    createRuntime: async () => runtime,
+  });
+
+  test('restores a second round into a store that already holds another round key', async () => {
+    const { runtime } = createRestoreRuntime({ otherRoundKey: true });
+    const result = await runRestoreCommand(
+      loadCliConfig({ environment: {} }),
+      '/ignored/round-b-backup.json',
+      restoreDependencies(runtime),
+    );
+
+    assert.equal(result.restoredSigningKeys, 1);
+    assert.equal(result.skippedSigningKeys, 1);
+  });
+
+  test('rolls back the imported state when the backup lacks this contract key', async () => {
+    const { calls, runtime } = createRestoreRuntime({ backupHasTargetKey: false });
+
+    await assert.rejects(
+      runRestoreCommand(
+        loadCliConfig({ environment: {} }),
+        '/ignored/backup.json',
+        restoreDependencies(runtime),
+      ),
+      /did not restore the signing key for this contract/,
+    );
+    assert.equal(calls.includes('remove-private-state'), true);
+    assert.equal(calls.includes('remove-signing-key'), false);
+    assert.equal(calls.at(-1), 'close');
+    assert.equal(await runtime.providers.privateStateProvider.get(), null);
   });
 
   test('refuses to overwrite existing private state', async () => {

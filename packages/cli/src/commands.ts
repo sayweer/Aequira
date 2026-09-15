@@ -135,6 +135,27 @@ const assertWalletHasDust = async (wallet: AequiraWalletProvider): Promise<void>
   }
 };
 
+const CLEANUP_WARNING =
+  'The wallet connection or private-state store did not close cleanly. The command outcome above is unaffected; restart the CLI before running another command.';
+
+/**
+ * Closes the runtime without letting a close failure replace the command's
+ * real outcome — by then a transaction may be final or a backup written, and
+ * reporting failure could lead to a duplicate submission.
+ */
+const closeRuntime = async (
+  runtime: AequiraRuntime | undefined,
+  dependencies: CommandDependencies,
+): Promise<void> => {
+  try {
+    await runtime?.close();
+  } catch {
+    (dependencies.reportCleanupWarning ?? ((message: string) => process.emitWarning(message)))(
+      CLEANUP_WARNING,
+    );
+  }
+};
+
 // The applicant attributes and salt stay zero until the institution's
 // enrollment receipt is imported: an all-zero salt is how the rest of the CLI
 // knows no receipt has arrived yet (see `hasImportedEnrollment`).
@@ -185,6 +206,7 @@ export type CommandDependencies = {
     promptSecret?: SecretPrompt,
   ) => Promise<RuntimeSecrets>;
   readonly readWalletSeed?: (config: CliConfig, promptSecret?: SecretPrompt) => Promise<Uint8Array>;
+  readonly reportCleanupWarning?: (message: string) => void;
   readonly runPrerequisiteChecks?: typeof runDoctor;
   readonly verifyBackup?: typeof verifyRuntimeBackupAuthentication;
   readonly writeBackup?: typeof writeRuntimeBackup;
@@ -360,7 +382,7 @@ export const runDeployCommand = async (
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -379,6 +401,8 @@ export type RestoreCommandResult = {
   readonly restoredPrivateStates: number;
   readonly restoredSigningKeys: number;
   readonly reviewerId: string;
+  /** Keys for other rounds this store already held, left untouched. */
+  readonly skippedSigningKeys: number;
 };
 
 export type WalletAddressCommandResult = {
@@ -614,7 +638,7 @@ export const runJoinCommand = async (
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -660,38 +684,64 @@ export const runRestoreCommand = async (
       );
     }
 
-    const signingKeyResult = await provider.importSigningKeys(backup.signingKeys, {
-      conflictStrategy: 'error',
-      maxKeys: 100,
-    });
-    const privateStateResult = await provider.importPrivateStates(backup.privateStates, {
-      conflictStrategy: 'error',
-      maxStates: 100,
-    });
-    const importedPrivateState = await provider.get(AEQUIRA_PRIVATE_STATE_ID);
-    const restoredSigningKey = await provider.getSigningKey(backup.contractAddress);
+    let importedPrivateStates = false;
 
-    if (importedPrivateState === null || restoredSigningKey === null) {
-      throw new Error('Backup did not restore the required AEQUIRA state and signing key');
+    try {
+      // Private states are scoped to this contract, so they go first and a
+      // conflict is a genuine error.
+      const privateStateResult = await provider.importPrivateStates(backup.privateStates, {
+        conflictStrategy: 'error',
+        maxStates: 100,
+      });
+      importedPrivateStates = true;
+      const importedPrivateState = await provider.get(AEQUIRA_PRIVATE_STATE_ID);
+
+      if (importedPrivateState === null) {
+        throw new Error('Backup did not restore the required AEQUIRA private state');
+      }
+
+      restoredPrivateState = importedPrivateState;
+      validateAequiraPrivateState(importedPrivateState);
+
+      // A signing-key export carries every key of the account, including other
+      // rounds'. This contract was checked to have no key above, so skipping
+      // conflicts only leaves other rounds' keys exactly as they already are.
+      const signingKeyResult = await provider.importSigningKeys(backup.signingKeys, {
+        conflictStrategy: 'skip',
+        maxKeys: 100,
+      });
+
+      if ((await provider.getSigningKey(backup.contractAddress)) === null) {
+        throw new Error('Backup did not restore the signing key for this contract');
+      }
+
+      return {
+        applicantId: toHex(deriveApplicantId(importedPrivateState.applicantSecret)),
+        contractAddress: backup.contractAddress,
+        restoredPrivateStates: privateStateResult.imported,
+        restoredSigningKeys: signingKeyResult.imported,
+        reviewerId: toHex(deriveReviewerId(importedPrivateState.reviewerSecret)),
+        skippedSigningKeys: signingKeyResult.skipped,
+      };
+    } catch (error) {
+      // Undo only what this run added — neither existed before it started —
+      // so a retry is not refused as an overwrite. Rollback failures must not
+      // hide the original error.
+      if (importedPrivateStates) {
+        await provider.remove(AEQUIRA_PRIVATE_STATE_ID).catch(() => undefined);
+      }
+      if ((await provider.getSigningKey(backup.contractAddress).catch(() => null)) !== null) {
+        await provider.removeSigningKey(backup.contractAddress).catch(() => undefined);
+      }
+      throw error;
     }
-
-    restoredPrivateState = importedPrivateState;
-    validateAequiraPrivateState(importedPrivateState);
-
-    return {
-      applicantId: toHex(deriveApplicantId(importedPrivateState.applicantSecret)),
-      contractAddress: backup.contractAddress,
-      restoredPrivateStates: privateStateResult.imported,
-      restoredSigningKeys: signingKeyResult.imported,
-      reviewerId: toHex(deriveReviewerId(importedPrivateState.reviewerSecret)),
-    };
   } finally {
     if (restoredPrivateState !== undefined) {
       clearPrivateState(restoredPrivateState);
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -772,7 +822,7 @@ const runExistingPrivateStateCall = async (
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -900,7 +950,7 @@ const runScoreOpeningCall = async (
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -1058,7 +1108,7 @@ export const runRegisterApplicantCommand = async (
 
     salt?.fill(0);
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -1153,7 +1203,7 @@ export const runImportEnrollmentCommand = async (
     }
 
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
@@ -1246,7 +1296,7 @@ export const runApplyCommand = async (
     applicantSecret?.fill(0);
     nonce?.fill(0);
     secrets.walletSeed.fill(0);
-    await runtime?.close();
+    await closeRuntime(runtime, dependencies);
   }
 };
 
