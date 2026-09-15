@@ -6,9 +6,9 @@ export const COMMANDS = [
   'config',
   'deploy',
   'doctor',
-  'enroll-applicant',
   'funding-status',
   'help',
+  'import-enrollment',
   'join',
   'open-applications',
   'open-reveal',
@@ -18,6 +18,7 @@ export const COMMANDS = [
   'register-reviewer',
   'restore',
   'reveal-score',
+  'round-status',
   'wallet-address',
   'wallet-create',
 ] as const;
@@ -25,12 +26,12 @@ export const COMMANDS = [
 export type CliCommand = (typeof COMMANDS)[number];
 
 export type CliArguments = {
+  readonly applicantId?: string;
   readonly applicationId?: string;
   readonly backupFile?: string;
   readonly command: CliCommand;
   readonly contractAddress?: string;
   readonly dustAddress?: string;
-  readonly enrollmentLeaf?: string;
   readonly json: boolean;
   readonly maxIncomeBand?: string;
   readonly minGpaScaled?: string;
@@ -78,11 +79,11 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   }
 
   let json = false;
+  let applicantId: string | undefined;
   let applicationId: string | undefined;
   let backupFile: string | undefined;
   let contractAddress: string | undefined;
   let dustAddress: string | undefined;
-  let enrollmentLeaf: string | undefined;
   let maxIncomeBand: string | undefined;
   let minGpaScaled: string | undefined;
   let network: AequiraNetwork | undefined;
@@ -163,8 +164,8 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
       continue;
     }
 
-    if (option === '--enrollment-leaf') {
-      enrollmentLeaf = readOptionValue(options, index, option);
+    if (option === '--applicant-id') {
+      applicantId = readOptionValue(options, index, option);
       index += 1;
       continue;
     }
@@ -181,14 +182,15 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   const requiresContractAddress =
     commandValue === 'apply' ||
     commandValue === 'commit-score' ||
-    commandValue === 'enroll-applicant' ||
+    commandValue === 'import-enrollment' ||
     commandValue === 'join' ||
     commandValue === 'open-applications' ||
     commandValue === 'open-reveal' ||
     commandValue === 'open-review' ||
     commandValue === 'register-applicant' ||
     commandValue === 'register-reviewer' ||
-    commandValue === 'reveal-score';
+    commandValue === 'reveal-score' ||
+    commandValue === 'round-status';
   const requiresApplicationId = commandValue === 'commit-score' || commandValue === 'reveal-score';
 
   if (commandValue === 'deploy' && roundId === undefined) {
@@ -239,12 +241,12 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
     throw new Error('--reviewer-id is only valid with register-reviewer');
   }
 
-  if (commandValue === 'register-applicant' && enrollmentLeaf === undefined) {
-    throw new Error('register-applicant requires --enrollment-leaf');
+  if (commandValue === 'register-applicant' && applicantId === undefined) {
+    throw new Error('register-applicant requires --applicant-id');
   }
 
-  if (commandValue !== 'register-applicant' && enrollmentLeaf !== undefined) {
-    throw new Error('--enrollment-leaf is only valid with register-applicant');
+  if (commandValue !== 'register-applicant' && applicantId !== undefined) {
+    throw new Error('--applicant-id is only valid with register-applicant');
   }
 
   if (commandValue !== 'register-dust' && dustAddress !== undefined) {
@@ -262,11 +264,11 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   return {
     command: commandValue as CliCommand,
     json,
+    ...(applicantId === undefined ? {} : { applicantId }),
     ...(applicationId === undefined ? {} : { applicationId }),
     ...(backupFile === undefined ? {} : { backupFile }),
     ...(contractAddress === undefined ? {} : { contractAddress }),
     ...(dustAddress === undefined ? {} : { dustAddress }),
-    ...(enrollmentLeaf === undefined ? {} : { enrollmentLeaf }),
     ...(maxIncomeBand === undefined ? {} : { maxIncomeBand }),
     ...(minGpaScaled === undefined ? {} : { minGpaScaled }),
     ...(network === undefined ? {} : { network }),

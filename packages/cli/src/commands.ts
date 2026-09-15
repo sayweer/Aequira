@@ -2,20 +2,31 @@ import { randomBytes } from 'node:crypto';
 
 import {
   AEQUIRA_PRIVATE_STATE_ID,
+  Phase,
   createAequiraPrivateState,
   deployAequira,
   deriveApplicantId,
-  deriveApplicantLeaf,
   deriveApplicationNonce,
+  deriveApplicationPseudonym,
+  deriveApplyNullifier,
   deriveReviewerId,
+  deriveScoreCommitment,
+  deriveScoreNullifier,
   deriveScoreSalt,
+  hasImportedEnrollment,
+  issueEnrollmentReceipt,
   joinAequira,
-  readRoundId,
+  openEnrollmentReceipt,
+  queryAequiraLedger,
   setAequiraPrivateState,
   validateAequiraPrivateState,
+  type AequiraLedger,
   type AequiraPrivateState,
+  type AequiraProviders,
   type FoundAequiraContract,
 } from '@aequira/sdk';
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import type { ContractAddress } from '@midnight-ntwrk/midnight-js-protocol/compact-runtime';
 import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 import { assertIsContractAddress, validatePassword } from '@midnight-ntwrk/midnight-js-utils';
@@ -124,6 +135,9 @@ const assertWalletHasDust = async (wallet: AequiraWalletProvider): Promise<void>
   }
 };
 
+// The applicant attributes and salt stay zero until the institution's
+// enrollment receipt is imported: an all-zero salt is how the rest of the CLI
+// knows no receipt has arrived yet (see `hasImportedEnrollment`).
 const createFreshPrivateState = (): AequiraPrivateState =>
   createAequiraPrivateState({
     adminSecret: randomBytes(32),
@@ -134,19 +148,38 @@ const createFreshPrivateState = (): AequiraPrivateState =>
     applicantIncomeBand: 0n,
     applicantGpaScaled: 0n,
     applicantRegionCode: 0n,
-    applicantSalt: randomBytes(32),
+    applicantSalt: new Uint8Array(32),
   });
 
+type PublicDataProviders = Pick<AequiraProviders, 'publicDataProvider'>;
+
+const readRoundLedger = async (
+  providers: PublicDataProviders,
+  contractAddress: ContractAddress,
+): Promise<AequiraLedger> => {
+  const ledgerState = await queryAequiraLedger(providers, contractAddress);
+
+  if (ledgerState === null) {
+    throw new Error('The indexer has not seen that contract address yet');
+  }
+
+  return ledgerState;
+};
+
+const toHex = (value: Uint8Array): string => Buffer.from(value).toString('hex');
+
 export type CommandDependencies = {
+  readonly createPublicDataProvider?: (config: CliConfig) => PublicDataProviders;
   readonly createWalletProvider?: typeof AequiraWalletProvider.create;
   readonly createRuntime?: typeof createAequiraRuntime;
   readonly deriveWalletAddress?: typeof deriveUnshieldedAddress;
   readonly deployContract?: typeof deployAequira;
+  readonly generateSalt?: () => Uint8Array;
   readonly generateWalletSeed?: typeof generateRandomSeed;
   readonly joinContract?: typeof joinAequira;
   readonly promptSecret?: SecretPrompt;
   readonly readBackup?: typeof readRuntimeBackup;
-  readonly readRoundId?: typeof readRoundId;
+  readonly readLedger?: typeof readRoundLedger;
   readonly readSecrets?: (
     config: CliConfig,
     promptSecret?: SecretPrompt,
@@ -200,7 +233,7 @@ export class EnrollmentBackupError extends Error {
 
   constructor(contractAddress: ContractAddress, cause: unknown) {
     super(
-      `Enrollment attributes were saved locally for ${contractAddress}, but encrypted backup creation failed. Preserve the private-state directory and repair the backup before re-enrolling with different attributes — losing this local store would permanently orphan whatever leaf the institution already registered.`,
+      `The enrollment receipt was imported locally for ${contractAddress}, but encrypted backup creation failed. Preserve the private-state directory and repair the backup — losing this local store loses the receipt's salt, and the institution would have to enroll you again during setup.`,
       { cause },
     );
     this.contractAddress = contractAddress;
@@ -332,6 +365,8 @@ export const runDeployCommand = async (
 };
 
 export type JoinCommandResult = {
+  /** The public handle an applicant gives the institution to be enrolled. */
+  readonly applicantId: string;
   readonly backupPath: string;
   readonly contractAddress: ContractAddress;
   readonly initializedPrivateState: boolean;
@@ -339,6 +374,7 @@ export type JoinCommandResult = {
 };
 
 export type RestoreCommandResult = {
+  readonly applicantId: string;
   readonly contractAddress: ContractAddress;
   readonly restoredPrivateStates: number;
   readonly restoredSigningKeys: number;
@@ -563,10 +599,11 @@ export const runJoinCommand = async (
     });
 
     return {
+      applicantId: toHex(deriveApplicantId(activePrivateState.applicantSecret)),
       contractAddress,
       backupPath,
       initializedPrivateState: initialPrivateState !== undefined,
-      reviewerId: Buffer.from(deriveReviewerId(activePrivateState.reviewerSecret)).toString('hex'),
+      reviewerId: toHex(deriveReviewerId(activePrivateState.reviewerSecret)),
     };
   } finally {
     if (existingPrivateState !== undefined) {
@@ -642,12 +679,11 @@ export const runRestoreCommand = async (
     validateAequiraPrivateState(importedPrivateState);
 
     return {
+      applicantId: toHex(deriveApplicantId(importedPrivateState.applicantSecret)),
       contractAddress: backup.contractAddress,
       restoredPrivateStates: privateStateResult.imported,
       restoredSigningKeys: signingKeyResult.imported,
-      reviewerId: Buffer.from(deriveReviewerId(importedPrivateState.reviewerSecret)).toString(
-        'hex',
-      ),
+      reviewerId: toHex(deriveReviewerId(importedPrivateState.reviewerSecret)),
     };
   } finally {
     if (restoredPrivateState !== undefined) {
@@ -753,13 +789,18 @@ const runExistingPrivateStateCall = async (
  * random salt per commit would instead silently strand the reveal of any
  * previously scored application. See `packages/ui/src/round.ts`'s
  * `buildOpening`, which follows the same pattern.
+ *
+ * Both calls check the public ledger first, before private state is touched or
+ * a proof is paid for. A commit is refused for an ID that is not a submitted
+ * application or that this reviewer already scored — the nullifier would make
+ * a mistyped commit permanent. A reveal is refused unless the score reopens a
+ * recorded commitment.
  */
 const runScoreOpeningCall = async (
   config: CliConfig,
   contractAddress: ContractAddress,
   applicationId: Uint8Array,
-  circuit: AequiraCallName,
-  scorePrompt: string,
+  circuit: 'commitScore' | 'revealScore',
   submitCall: SubmitContractCall,
   dependencies: CommandDependencies,
 ): Promise<TransactionCommandResult> => {
@@ -772,7 +813,19 @@ const runScoreOpeningCall = async (
   let runtime: AequiraRuntime | undefined;
 
   try {
-    const score = parseScore(await promptSecret(scorePrompt));
+    const score = parseScore(
+      await promptSecret(
+        circuit === 'commitScore' ? 'Review score (0-100): ' : 'Score to reveal (0-100): ',
+      ),
+    );
+
+    if (
+      circuit === 'commitScore' &&
+      parseScore(await promptSecret('Confirm review score: ')) !== score
+    ) {
+      throw new Error('The two scores do not match; nothing was submitted');
+    }
+
     runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
       config,
       privateStatePassword: secrets.privateStatePassword,
@@ -788,11 +841,36 @@ const runScoreOpeningCall = async (
     );
     currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const reviewerSecret = Uint8Array.from(currentPrivateState.reviewerSecret);
-    const roundId = await (dependencies.readRoundId ?? readRoundId)(
+    const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
       runtime.providers,
       contractAddress,
     );
+    const roundId = Uint8Array.from(ledgerState.roundId);
     const scoreSalt = await deriveScoreSalt(roundId, applicationId, reviewerSecret);
+
+    if (circuit === 'commitScore') {
+      if (!ledgerState.applications.member(applicationId)) {
+        throw new Error(
+          'That application ID is not a submitted application in this round; check round-status',
+        );
+      }
+      if (
+        ledgerState.scoreNullifiers.member(
+          deriveScoreNullifier(roundId, applicationId, reviewerSecret),
+        )
+      ) {
+        throw new Error('This reviewer already committed a score for that application');
+      }
+    } else if (
+      !ledgerState.scoreCommitments.member(
+        deriveScoreCommitment(roundId, applicationId, score, reviewerSecret, scoreSalt),
+      )
+    ) {
+      throw new Error(
+        'That score does not open a commitment recorded for this application; check the application ID and the score',
+      );
+    }
+
     nextPrivateState = createAequiraPrivateState({
       ...currentPrivateState,
       reviewerSecret,
@@ -839,7 +917,6 @@ export const runCommitScoreCommand = async (
     contractAddress,
     applicationId,
     'commitScore',
-    'Review score (0-100): ',
     (contract) => contract.callTx.commitScore(applicationId),
     dependencies,
   );
@@ -858,7 +935,6 @@ export const runRevealScoreCommand = async (
     contractAddress,
     applicationId,
     'revealScore',
-    'Score to reveal (0-100): ',
     (contract) => contract.callTx.revealScore(applicationId),
     dependencies,
   );
@@ -882,78 +958,54 @@ export const runRegisterReviewerCommand = async (
   );
 };
 
-export const runRegisterApplicantCommand = async (
-  config: CliConfig,
-  contractAddressValue: string,
-  enrollmentLeafHex: string,
-  dependencies: CommandDependencies = {},
-): Promise<TransactionCommandResult> => {
-  const contractAddress = parseContractAddress(contractAddressValue);
-  const enrollmentLeaf = parseBytes32('enrollment leaf', enrollmentLeafHex);
-
-  return runExistingPrivateStateCall(
-    config,
-    contractAddress,
-    'registerApplicant',
-    (contract) => contract.callTx.registerApplicant(enrollmentLeaf),
-    dependencies,
-  );
-};
-
-export type EnrollApplicantCommandResult = {
+export type RegisterApplicantCommandResult = Omit<TransactionCommandResult, 'backupPath'> & {
   readonly applicantId: string;
-  readonly backupPath: string;
-  readonly contractAddress: ContractAddress;
   readonly enrollmentLeaf: string;
+  /** Private: the verified attributes and salt. Goes to the applicant only. */
+  readonly enrollmentReceipt: string;
 };
 
 /**
- * Computes the enrollment leaf locally, the same way `apply`'s own witness
- * later recomputes it, and never sends the applicant's attributes or secret
- * anywhere. The institution only ever receives the resulting `enrollmentLeaf`
- * to pass to `register-applicant` — see `deriveApplicantLeaf` in
- * `@aequira/sdk` for why there is no alternative path that builds the same
- * leaf from an ID instead of the raw attributes and secret.
+ * The institution's side of enrollment. It verifies the applicant's attributes
+ * out of band, types them at masked prompts, draws a fresh salt, and registers
+ * the leaf built from the applicant's public ID — the applicant's secret is
+ * never involved. The returned receipt is how the applicant learns the exact
+ * attributes and salt `apply` must reopen, so a figure the institution did not
+ * verify can never pass the eligibility check.
  *
- * Requires local private state to already exist for this contract (run `join`
- * first): enrollment reuses the `applicantSecret` and `applicantSalt` that
- * `join` already drew at random, rather than generating new ones, so this
- * command can be re-run safely if the attributes were entered incorrectly —
- * the same secret and salt keep working the next time `apply` needs them.
+ * No backup is written: the administrator's private state does not change, and
+ * a failed backup must never cost the receipt of a finalized registration.
  */
-export const runEnrollApplicantCommand = async (
+export const runRegisterApplicantCommand = async (
   config: CliConfig,
   contractAddressValue: string,
-  attributePrompts: {
-    readonly gpaScaledPrompt: string;
-    readonly incomeBandPrompt: string;
-    readonly regionCodePrompt: string;
-  },
+  applicantIdHex: string,
   dependencies: CommandDependencies = {},
-): Promise<EnrollApplicantCommandResult> => {
+): Promise<RegisterApplicantCommandResult> => {
   const contractAddress = parseContractAddress(contractAddressValue);
+  const applicantId = parseBytes32('applicant ID', applicantIdHex);
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
   const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
   const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let currentPrivateState: AequiraPrivateState | undefined;
-  let nextPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
+  let salt: Uint8Array | undefined;
 
   try {
     const incomeBand = parseThreshold(
       'Income band',
-      await promptSecret(attributePrompts.incomeBandPrompt),
+      await promptSecret('Verified income band (0-255): '),
       255n,
     );
     const gpaScaled = parseThreshold(
       'Scaled grade average',
-      await promptSecret(attributePrompts.gpaScaledPrompt),
+      await promptSecret('Verified scaled grade average (0-65535): '),
       65535n,
     );
     const regionCode = parseThreshold(
       'Region code',
-      await promptSecret(attributePrompts.regionCodePrompt),
+      await promptSecret('Verified region code (0-255): '),
       255n,
     );
     runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
@@ -962,16 +1014,112 @@ export const runEnrollApplicantCommand = async (
       walletSeed: secrets.walletSeed,
     });
     await runtime.wallet.start();
+    await assertWalletHasDust(runtime.wallet);
+
+    const contract = await joinForCall(
+      runtime,
+      contractAddress,
+      dependencies.joinContract ?? joinAequira,
+    );
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
+    const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
+      runtime.providers,
+      contractAddress,
+    );
+
+    if (ledgerState.phase !== Phase.SETUP) {
+      throw new Error('Applicants can only be enrolled while the round is in setup');
+    }
+
+    salt = (dependencies.generateSalt ?? (() => randomBytes(32)))();
+    const { enrollmentLeaf, receipt } = issueEnrollmentReceipt({
+      roundId: Uint8Array.from(ledgerState.roundId),
+      applicantId,
+      incomeBand,
+      gpaScaled,
+      regionCode,
+      salt,
+    });
+    const txData = await contract.callTx.registerApplicant(enrollmentLeaf);
+
+    return {
+      contractAddress,
+      transactionId: txData.public.txId,
+      transactionHash: txData.public.txHash,
+      blockHeight: txData.public.blockHeight,
+      applicantId: toHex(applicantId),
+      enrollmentLeaf: toHex(enrollmentLeaf),
+      enrollmentReceipt: receipt,
+    };
+  } finally {
+    if (currentPrivateState !== undefined) {
+      clearPrivateState(currentPrivateState);
+    }
+
+    salt?.fill(0);
+    secrets.walletSeed.fill(0);
+    await runtime?.close();
+  }
+};
+
+export type ImportEnrollmentCommandResult = {
+  readonly applicantId: string;
+  readonly backupPath: string;
+  readonly contractAddress: ContractAddress;
+  /** Whether the institution's registration of this leaf is already on chain. */
+  readonly enrolledOnChain: boolean;
+  readonly enrollmentLeaf: string;
+};
+
+/**
+ * The applicant's side of enrollment. Reads the institution's receipt at a
+ * masked prompt, checks it against this round and this applicant's own secret,
+ * and stores the attributes and salt in encrypted private state for `apply`.
+ *
+ * Needs no wallet sync and no Dust: nothing is submitted.
+ */
+export const runImportEnrollmentCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  dependencies: CommandDependencies = {},
+): Promise<ImportEnrollmentCommandResult> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const promptSecret = dependencies.promptSecret ?? promptHiddenSecret;
+  const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
+  let currentPrivateState: AequiraPrivateState | undefined;
+  let nextPrivateState: AequiraPrivateState | undefined;
+  let runtime: AequiraRuntime | undefined;
+
+  try {
+    const receiptText = await promptSecret('Enrollment receipt from the institution: ');
+    runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
+      config,
+      privateStatePassword: secrets.privateStatePassword,
+      walletSeed: secrets.walletSeed,
+    });
     currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const applicantSecret = Uint8Array.from(currentPrivateState.applicantSecret);
-    const applicantSalt = Uint8Array.from(currentPrivateState.applicantSalt);
+    const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
+      runtime.providers,
+      contractAddress,
+    );
+    const roundId = Uint8Array.from(ledgerState.roundId);
+
+    if (ledgerState.phase > Phase.APPLY) {
+      throw new Error('Enrollment receipts can only be imported before review opens');
+    }
+    if (ledgerState.applyNullifiers.member(deriveApplyNullifier(roundId, applicantSecret))) {
+      throw new Error('This applicant already applied to the round; the enrollment cannot change');
+    }
+
+    const opened = openEnrollmentReceipt(receiptText, { roundId, applicantSecret });
     nextPrivateState = createAequiraPrivateState({
       ...currentPrivateState,
       applicantSecret,
-      applicantSalt,
-      applicantIncomeBand: incomeBand,
-      applicantGpaScaled: gpaScaled,
-      applicantRegionCode: regionCode,
+      applicantIncomeBand: opened.incomeBand,
+      applicantGpaScaled: opened.gpaScaled,
+      applicantRegionCode: opened.regionCode,
+      applicantSalt: opened.salt,
     });
     await setAequiraPrivateState(runtime.providers, contractAddress, nextPrivateState);
 
@@ -989,12 +1137,12 @@ export const runEnrollApplicantCommand = async (
     }
 
     return {
-      applicantId: Buffer.from(deriveApplicantId(applicantSecret)).toString('hex'),
+      applicantId: toHex(deriveApplicantId(applicantSecret)),
       backupPath,
       contractAddress,
-      enrollmentLeaf: Buffer.from(
-        deriveApplicantLeaf(incomeBand, gpaScaled, regionCode, applicantSecret, applicantSalt),
-      ).toString('hex'),
+      enrolledOnChain:
+        ledgerState.applicantTree.findPathForLeaf(opened.enrollmentLeaf) !== undefined,
+      enrollmentLeaf: toHex(opened.enrollmentLeaf),
     };
   } finally {
     if (currentPrivateState !== undefined) {
@@ -1018,11 +1166,16 @@ export const runEnrollApplicantCommand = async (
  * persist a new private-state field for it — see `deriveApplicationNonce` in
  * `@aequira/sdk`.
  */
+export type ApplyCommandResult = TransactionCommandResult & {
+  /** The public pseudonym reviewers score. It names no one. */
+  readonly applicationId: string;
+};
+
 export const runApplyCommand = async (
   config: CliConfig,
   contractAddressValue: string,
   dependencies: CommandDependencies = {},
-): Promise<TransactionCommandResult> => {
+): Promise<ApplyCommandResult> => {
   const contractAddress = parseContractAddress(contractAddressValue);
   const checks = await (dependencies.runPrerequisiteChecks ?? runDoctor)(config);
   assertDoctorReady(checks);
@@ -1030,6 +1183,8 @@ export const runApplyCommand = async (
   const secrets = await (dependencies.readSecrets ?? readRuntimeSecrets)(config, promptSecret);
   let currentPrivateState: AequiraPrivateState | undefined;
   let runtime: AequiraRuntime | undefined;
+  let applicantSecret: Uint8Array | undefined;
+  let nonce: Uint8Array | undefined;
 
   try {
     runtime = await (dependencies.createRuntime ?? createAequiraRuntime)({
@@ -1046,12 +1201,28 @@ export const runApplyCommand = async (
       dependencies.joinContract ?? joinAequira,
     );
     currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
-    const applicantSecret = Uint8Array.from(currentPrivateState.applicantSecret);
-    const roundId = await (dependencies.readRoundId ?? readRoundId)(
+
+    if (!hasImportedEnrollment(currentPrivateState)) {
+      throw new Error(
+        'No enrollment receipt has been imported for this round; run import-enrollment first',
+      );
+    }
+
+    applicantSecret = Uint8Array.from(currentPrivateState.applicantSecret);
+    const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
       runtime.providers,
       contractAddress,
     );
-    const nonce = await deriveApplicationNonce(roundId, applicantSecret);
+    const roundId = Uint8Array.from(ledgerState.roundId);
+    nonce = await deriveApplicationNonce(roundId, applicantSecret);
+    const applicationId = toHex(deriveApplicationPseudonym(roundId, applicantSecret, nonce));
+
+    if (ledgerState.applyNullifiers.member(deriveApplyNullifier(roundId, applicantSecret))) {
+      throw new Error(
+        `This applicant already applied to the round as application ${applicationId}`,
+      );
+    }
+
     const txData = await contract.callTx.apply(nonce);
     const backupPath = await writeFinalizedCallBackup(
       secrets.privateStatePassword,
@@ -1063,15 +1234,80 @@ export const runApplyCommand = async (
       dependencies.writeBackup ?? writeRuntimeBackup,
     );
 
-    return toTransactionCommandResult(contractAddress, txData.public, backupPath);
+    return {
+      ...toTransactionCommandResult(contractAddress, txData.public, backupPath),
+      applicationId,
+    };
   } finally {
     if (currentPrivateState !== undefined) {
       clearPrivateState(currentPrivateState);
     }
 
+    applicantSecret?.fill(0);
+    nonce?.fill(0);
     secrets.walletSeed.fill(0);
     await runtime?.close();
   }
+};
+
+export type RoundStatusApplication = {
+  readonly applicationId: string;
+  /** Present once at least one reviewer has revealed a score for it. */
+  readonly revealedCount: string | null;
+  readonly scoreSum: string | null;
+};
+
+export type RoundStatus = {
+  readonly applications: readonly RoundStatusApplication[];
+  readonly applyNullifiers: string;
+  /** Leaves the institution registered; a re-issued receipt adds one more. */
+  readonly enrollmentLeaves: string;
+  readonly maxIncomeBand: string;
+  readonly minGpaScaled: string;
+  readonly phase: string;
+  readonly reviewers: readonly string[];
+  readonly scoreCommitments: string;
+  readonly scoreNullifiers: string;
+};
+
+/** Everything a reviewer or observer needs from the public ledger, and nothing else. */
+export const toRoundStatus = (ledgerState: AequiraLedger): RoundStatus => ({
+  applications: [...ledgerState.applications].map((applicationId) => ({
+    applicationId: toHex(applicationId),
+    revealedCount: ledgerState.revealedCounts.member(applicationId)
+      ? ledgerState.revealedCounts.lookup(applicationId).read().toString()
+      : null,
+    scoreSum: ledgerState.scoreSums.member(applicationId)
+      ? ledgerState.scoreSums.lookup(applicationId).read().toString()
+      : null,
+  })),
+  applyNullifiers: ledgerState.applyNullifiers.size().toString(),
+  enrollmentLeaves: ledgerState.applicantTree.firstFree().toString(),
+  maxIncomeBand: ledgerState.maxIncomeBand.toString(),
+  minGpaScaled: ledgerState.minGpaScaled.toString(),
+  phase: Phase[ledgerState.phase] ?? `UNKNOWN(${ledgerState.phase})`,
+  reviewers: [...ledgerState.reviewers].map(toHex),
+  scoreCommitments: ledgerState.scoreCommitments.size().toString(),
+  scoreNullifiers: ledgerState.scoreNullifiers.size().toString(),
+});
+
+/** Reads the public ledger only: no wallet, no password, no private state. */
+export const runRoundStatusCommand = async (
+  config: CliConfig,
+  contractAddressValue: string,
+  dependencies: CommandDependencies = {},
+): Promise<RoundStatus> => {
+  const contractAddress = parseContractAddress(contractAddressValue);
+  const providers =
+    dependencies.createPublicDataProvider?.(config) ??
+    (() => {
+      setNetworkId(config.network);
+      return { publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWs) };
+    })();
+
+  return toRoundStatus(
+    await (dependencies.readLedger ?? readRoundLedger)(providers, contractAddress),
+  );
 };
 
 export type PhaseCommand = 'open-applications' | 'open-reveal' | 'open-review';

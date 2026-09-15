@@ -5,8 +5,8 @@ import {
   runApplyCommand,
   runCommitScoreCommand,
   runDeployCommand,
-  runEnrollApplicantCommand,
   runFundingStatusCommand,
+  runImportEnrollmentCommand,
   runJoinCommand,
   runPhaseCommand,
   runRegisterApplicantCommand,
@@ -14,6 +14,7 @@ import {
   runRegisterReviewerCommand,
   runRestoreCommand,
   runRevealScoreCommand,
+  runRoundStatusCommand,
   runWalletAddressCommand,
   runWalletCreateCommand,
 } from './commands.js';
@@ -34,21 +35,24 @@ Usage:
   aequira join --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira restore --backup-file PATH [--network preview|preprod] [--json]
   aequira register-reviewer --contract-address ADDRESS --reviewer-id 64_HEX [--network preview|preprod] [--json]
-  aequira enroll-applicant --contract-address ADDRESS [--network preview|preprod] [--json]
-  aequira register-applicant --contract-address ADDRESS --enrollment-leaf 64_HEX [--network preview|preprod] [--json]
+  aequira register-applicant --contract-address ADDRESS --applicant-id 64_HEX [--network preview|preprod] [--json]
+  aequira import-enrollment --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira open-applications --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira apply --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira open-review --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira commit-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
   aequira open-reveal --contract-address ADDRESS [--network preview|preprod] [--json]
   aequira reveal-score --contract-address ADDRESS --application-id 64_HEX [--network preview|preprod] [--json]
+  aequira round-status --contract-address ADDRESS [--network preview|preprod] [--json]
 
 Secrets are intentionally not accepted as command-line arguments.
 wallet-create stores a new Wallet SDK seed in an encrypted, local-only vault.
 Wallet and private-state commands require an interactive TTY for masked secret entry.
-enroll-applicant prompts for income band, scaled grade average and region code,
-computes the enrollment leaf locally, and never sends the attributes or the
-applicant secret to register-applicant — only the resulting leaf is handed over.
+Enrollment: the applicant runs join and hands its applicantId to the institution.
+The institution verifies the attributes, runs register-applicant (masked prompts)
+and passes the printed enrollmentReceipt to the applicant privately; the
+applicant runs import-enrollment before apply.
+round-status reads the public ledger only and needs no wallet or password.
 `;
 
 const write = (value: string): void => {
@@ -198,41 +202,51 @@ const main = async (): Promise<void> => {
   }
 
   if (args.command === 'register-applicant') {
-    if (args.contractAddress === undefined || args.enrollmentLeaf === undefined) {
-      throw new Error('register-applicant requires --contract-address and --enrollment-leaf');
+    if (args.contractAddress === undefined || args.applicantId === undefined) {
+      throw new Error('register-applicant requires --contract-address and --applicant-id');
     }
 
     const result = await runRegisterApplicantCommand(
       config,
       args.contractAddress,
-      args.enrollmentLeaf,
+      args.applicantId,
     );
     write(JSON.stringify(result, null, args.json ? 2 : 0));
 
     if (!args.json) {
+      write(
+        'enrollmentReceipt contains the verified attributes and salt. Give it to the applicant privately, never through a public channel; they import it with import-enrollment.',
+      );
+    }
+    return;
+  }
+
+  if (args.command === 'import-enrollment') {
+    if (args.contractAddress === undefined) {
+      throw new Error('import-enrollment requires --contract-address');
+    }
+
+    const result = await runImportEnrollmentCommand(config, args.contractAddress);
+    write(JSON.stringify(result, null, args.json ? 2 : 0));
+
+    if (!args.json) {
+      if (!result.enrolledOnChain) {
+        write(
+          'The receipt is valid, but its leaf is not on chain yet. Wait for the institution’s registration to finalize before applying.',
+        );
+      }
       writeBackupReminder();
     }
     return;
   }
 
-  if (args.command === 'enroll-applicant') {
+  if (args.command === 'round-status') {
     if (args.contractAddress === undefined) {
-      throw new Error('enroll-applicant requires --contract-address');
+      throw new Error('round-status requires --contract-address');
     }
 
-    const result = await runEnrollApplicantCommand(config, args.contractAddress, {
-      incomeBandPrompt: 'Income band (0-255): ',
-      gpaScaledPrompt: 'Scaled grade average (0-65535): ',
-      regionCodePrompt: 'Region code (0-255): ',
-    });
+    const result = await runRoundStatusCommand(config, args.contractAddress);
     write(JSON.stringify(result, null, args.json ? 2 : 0));
-
-    if (!args.json) {
-      write(
-        'Hand enrollmentLeaf to the institution for register-applicant. It discloses nothing about the attributes or the applicant secret behind it.',
-      );
-      writeBackupReminder();
-    }
     return;
   }
 

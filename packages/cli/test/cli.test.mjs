@@ -7,9 +7,16 @@ import { fileURLToPath } from 'node:url';
 
 import {
   AEQUIRA_PRIVATE_STATE_ID,
+  deriveApplicantId,
   deriveApplicantLeaf,
   deriveApplicationNonce,
+  deriveApplicationPseudonym,
+  deriveApplyNullifier,
+  deriveScoreCommitment,
+  deriveScoreNullifier,
   deriveScoreSalt,
+  issueEnrollmentReceipt,
+  openEnrollmentReceipt,
 } from '@aequira/sdk';
 import {
   sampleContractAddress,
@@ -40,8 +47,8 @@ import {
   runCommitScoreCommand,
   runDeployCommand,
   runDoctor,
-  runEnrollApplicantCommand,
   runFundingStatusCommand,
+  runImportEnrollmentCommand,
   runJoinCommand,
   runPhaseCommand,
   runRegisterApplicantCommand,
@@ -49,8 +56,10 @@ import {
   runRegisterReviewerCommand,
   runRestoreCommand,
   runRevealScoreCommand,
+  runRoundStatusCommand,
   runWalletAddressCommand,
   runWalletCreateCommand,
+  toRoundStatus,
   verifyRuntimeBackupAuthentication,
   writeRuntimeBackup,
   writeWalletVault,
@@ -87,6 +96,61 @@ const privateStateFixture = (overrides = {}) => ({
   applicantRegionCode: 7n,
   applicantSalt: new Uint8Array(32).fill(5),
   ...overrides,
+});
+
+const hexKey = (value) => Buffer.from(value).toString('hex');
+
+const setOf = (values = []) => {
+  const keys = new Set(values.map(hexKey));
+  return {
+    member: (value) => keys.has(hexKey(value)),
+    size: () => BigInt(keys.size),
+    *[Symbol.iterator]() {
+      yield* values;
+    },
+  };
+};
+
+const counterMapOf = (entries = []) => {
+  const counters = new Map(entries.map(([key, value]) => [hexKey(key), value]));
+  return {
+    member: (key) => counters.has(hexKey(key)),
+    lookup: (key) => ({ read: () => counters.get(hexKey(key)) }),
+  };
+};
+
+// The slice of the public ledger the commands read. Only what a test names is
+// present; every set starts empty.
+const ledgerFixture = ({
+  roundId,
+  phase = 0,
+  applications = [],
+  applyNullifiers = [],
+  enrolledLeaves = [],
+  reviewers = [],
+  revealedCounts = [],
+  scoreCommitments = [],
+  scoreNullifiers = [],
+  scoreSums = [],
+} = {}) => ({
+  roundId,
+  phase,
+  maxIncomeBand: 3n,
+  minGpaScaled: 300n,
+  applications: setOf(applications),
+  applyNullifiers: setOf(applyNullifiers),
+  reviewers: setOf(reviewers),
+  scoreCommitments: setOf(scoreCommitments),
+  scoreNullifiers: setOf(scoreNullifiers),
+  applicantTree: {
+    firstFree: () => BigInt(enrolledLeaves.length),
+    findPathForLeaf: (leaf) =>
+      enrolledLeaves.some((enrolled) => hexKey(enrolled) === hexKey(leaf))
+        ? { leaf, path: [] }
+        : undefined,
+  },
+  revealedCounts: counterMapOf(revealedCounts),
+  scoreSums: counterMapOf(scoreSums),
 });
 
 describe('AEQUIRA CLI configuration', () => {
@@ -203,10 +267,10 @@ describe('AEQUIRA CLI configuration', () => {
     assert.throws(
       () =>
         parseCliArguments(['register-applicant', '--contract-address', sampleContractAddress()]),
-      /requires --enrollment-leaf/,
+      /requires --applicant-id/,
     );
     assert.throws(
-      () => parseCliArguments(['register-applicant', '--enrollment-leaf', 'ab'.repeat(32)]),
+      () => parseCliArguments(['register-applicant', '--applicant-id', 'ab'.repeat(32)]),
       /requires --contract-address/,
     );
     assert.throws(
@@ -215,11 +279,12 @@ describe('AEQUIRA CLI configuration', () => {
           'join',
           '--contract-address',
           sampleContractAddress(),
-          '--enrollment-leaf',
+          '--applicant-id',
           'ab'.repeat(32),
         ]),
-      /--enrollment-leaf is only valid with register-applicant/,
+      /--applicant-id is only valid with register-applicant/,
     );
+    assert.throws(() => parseCliArguments(['enroll-applicant']), /Unknown command/);
     assert.deepEqual(
       parseCliArguments([
         'register-dust',
@@ -246,21 +311,26 @@ describe('AEQUIRA CLI configuration', () => {
         'register-applicant',
         '--contract-address',
         applicantContractAddress,
-        '--enrollment-leaf',
+        '--applicant-id',
         'ab'.repeat(32),
       ]),
       {
         command: 'register-applicant',
         json: false,
+        applicantId: 'ab'.repeat(32),
         contractAddress: applicantContractAddress,
-        enrollmentLeaf: 'ab'.repeat(32),
       },
     );
-    assert.throws(() => parseCliArguments(['enroll-applicant']), /requires --contract-address/);
+    assert.throws(() => parseCliArguments(['import-enrollment']), /requires --contract-address/);
     assert.equal(
-      parseCliArguments(['enroll-applicant', '--contract-address', sampleContractAddress()])
+      parseCliArguments(['import-enrollment', '--contract-address', sampleContractAddress()])
         .command,
-      'enroll-applicant',
+      'import-enrollment',
+    );
+    assert.throws(() => parseCliArguments(['round-status']), /requires --contract-address/);
+    assert.equal(
+      parseCliArguments(['round-status', '--contract-address', sampleContractAddress()]).command,
+      'round-status',
     );
     assert.throws(() => parseCliArguments(['apply']), /requires --contract-address/);
     assert.equal(
@@ -936,6 +1006,7 @@ describe('AEQUIRA CLI deployment commands', () => {
 
     assert.equal(result.initializedPrivateState, false);
     assert.match(result.reviewerId, /^[0-9a-f]{64}$/);
+    assert.equal(result.applicantId, hexKey(deriveApplicantId(existing.applicantSecret)));
     assert.deepEqual(joinOptions, { contractAddress });
     assert.deepEqual(calls, ['start', 'sync', 'join', 'backup', 'close']);
     assert.equal(
@@ -949,6 +1020,8 @@ describe('AEQUIRA CLI deployment commands', () => {
     const { runtime } = createCommandRuntime();
     const contractAddress = sampleContractAddress();
     let initialPrivateState;
+    let saltAtJoin;
+    let applicantSecretAtJoin;
     const result = await runJoinCommand(config, contractAddress, {
       runPrerequisiteChecks: async () => readyChecks,
       readSecrets: async () => ({
@@ -958,6 +1031,8 @@ describe('AEQUIRA CLI deployment commands', () => {
       createRuntime: async () => runtime,
       joinContract: async (_providers, options) => {
         initialPrivateState = options.initialPrivateState;
+        saltAtJoin = Uint8Array.from(options.initialPrivateState.applicantSalt);
+        applicantSecretAtJoin = Uint8Array.from(options.initialPrivateState.applicantSecret);
         return {};
       },
       writeBackup: async () => '/ignored/first-join.json',
@@ -965,6 +1040,16 @@ describe('AEQUIRA CLI deployment commands', () => {
 
     assert.equal(result.initializedPrivateState, true);
     assert.match(result.reviewerId, /^[0-9a-f]{64}$/);
+    // No receipt yet: the salt stays zero while the applicant secret is random.
+    assert.equal(
+      saltAtJoin.every((byte) => byte === 0),
+      true,
+    );
+    assert.equal(
+      applicantSecretAtJoin.some((byte) => byte !== 0),
+      true,
+    );
+    assert.equal(result.applicantId, hexKey(deriveApplicantId(applicantSecretAtJoin)));
     assert.equal(
       initialPrivateState.reviewerSecret.every((byte) => byte === 0),
       true,
@@ -992,6 +1077,7 @@ describe('AEQUIRA CLI backup restoration', () => {
     );
 
     assert.deepEqual(result, {
+      applicantId: hexKey(deriveApplicantId(validCommandPrivateState().applicantSecret)),
       contractAddress: backup.contractAddress,
       restoredPrivateStates: 1,
       restoredSigningKeys: 1,
@@ -1102,21 +1188,37 @@ describe('AEQUIRA CLI administrator commands', () => {
     assert.deepEqual(calls, ['start', 'funding', 'register-reviewer', 'backup', 'close']);
   });
 
-  test('registers an enrollment leaf with the stored admin state', async () => {
+  test('enrolls an applicant from their public ID and issues a receipt only they can open', async () => {
     const { calls, runtime } = createCommandRuntime(validCommandPrivateState());
     const contractAddress = sampleContractAddress();
+    const roundId = new Uint8Array(32).fill(6);
+    // The applicant's secret lives on their device; the institution sees only the ID.
+    const applicantSecret = new Uint8Array(32).fill(0x44);
+    const applicantIdHex = hexKey(deriveApplicantId(applicantSecret));
+    const promptedValues = ['2', '350', '7'];
+    const prompts = [];
+    let salt;
     let capturedLeaf;
     const result = await runRegisterApplicantCommand(
       loadCliConfig({ environment: {} }),
       contractAddress,
-      'ab'.repeat(32),
+      applicantIdHex,
       {
         runPrerequisiteChecks: async () => readyChecks,
         readSecrets: async () => ({
           privateStatePassword: 'R7!mQ2@vL9#zT4$p',
           walletSeed: new Uint8Array(32).fill(6),
         }),
+        promptSecret: async (prompt) => {
+          prompts.push(prompt);
+          return promptedValues[prompts.length - 1];
+        },
         createRuntime: async () => runtime,
+        readLedger: async () => ledgerFixture({ roundId, phase: 0 }),
+        generateSalt: () => {
+          salt = new Uint8Array(32).fill(0x5a);
+          return salt;
+        },
         joinContract: async () => ({
           callTx: {
             registerApplicant: async (leaf) => {
@@ -1127,15 +1229,62 @@ describe('AEQUIRA CLI administrator commands', () => {
           },
         }),
         writeBackup: async () => {
-          calls.push('backup');
+          calls.push('unexpected-backup');
           return '/ignored/register-applicant.json';
         },
       },
     );
+    const opened = openEnrollmentReceipt(result.enrollmentReceipt, { roundId, applicantSecret });
 
-    assert.deepEqual(Array.from(capturedLeaf), Array(32).fill(0xab));
+    assert.deepEqual(
+      Array.from(capturedLeaf),
+      Array.from(deriveApplicantLeaf(2n, 350n, 7n, applicantSecret, new Uint8Array(32).fill(0x5a))),
+    );
+    assert.equal(result.enrollmentLeaf, hexKey(capturedLeaf));
+    assert.equal(result.applicantId, applicantIdHex);
     assert.equal(result.transactionId, 'tx-id-1');
-    assert.deepEqual(calls, ['start', 'funding', 'register-applicant', 'backup', 'close']);
+    assert.equal(opened.incomeBand, 2n);
+    assert.equal(opened.gpaScaled, 350n);
+    assert.equal(opened.regionCode, 7n);
+    assert.equal(prompts.length, 3);
+    assert.equal(
+      salt.every((byte) => byte === 0),
+      true,
+    );
+    assert.deepEqual(calls, ['start', 'funding', 'register-applicant', 'close']);
+  });
+
+  test('refuses to enroll an applicant once the round has left setup', async () => {
+    const { calls, runtime } = createCommandRuntime(validCommandPrivateState());
+
+    await assert.rejects(
+      runRegisterApplicantCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        'ab'.repeat(32),
+        {
+          runPrerequisiteChecks: async () => readyChecks,
+          readSecrets: async () => ({
+            privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+            walletSeed: new Uint8Array(32).fill(6),
+          }),
+          promptSecret: async () => '2',
+          createRuntime: async () => runtime,
+          readLedger: async () => ledgerFixture({ roundId: new Uint8Array(32).fill(6), phase: 1 }),
+          joinContract: async () => ({
+            callTx: {
+              registerApplicant: async () => {
+                calls.push('must-not-register');
+                return { public: finalizedPublicData };
+              },
+            },
+          }),
+        },
+      ),
+      /only be enrolled while the round is in setup/,
+    );
+    assert.equal(calls.includes('must-not-register'), false);
+    assert.equal(calls.at(-1), 'close');
   });
 
   test('maps each phase command to its exact contract circuit', async () => {
@@ -1176,114 +1325,234 @@ describe('AEQUIRA CLI administrator commands', () => {
 
 describe('AEQUIRA CLI applicant commands', () => {
   const roundId = new Uint8Array(32).fill(6);
-  const enrollPrompts = {
-    incomeBandPrompt: 'Income band (0-255): ',
-    gpaScaledPrompt: 'Scaled grade average (0-65535): ',
-    regionCodePrompt: 'Region code (0-255): ',
-  };
-
-  test('enrolls an applicant by computing the leaf locally, never sending attributes or the secret', async () => {
-    const privateState = privateStateFixture({
+  const institutionSalt = new Uint8Array(32).fill(0x5a);
+  // A fresh store: applicant secret drawn at join, no receipt imported yet.
+  const unenrolledState = () =>
+    privateStateFixture({
       applicantIncomeBand: 0n,
       applicantGpaScaled: 0n,
       applicantRegionCode: 0n,
+      applicantSalt: new Uint8Array(32),
     });
+  const issueFor = (applicantSecret) =>
+    issueEnrollmentReceipt({
+      roundId,
+      applicantId: deriveApplicantId(applicantSecret),
+      incomeBand: 2n,
+      gpaScaled: 350n,
+      regionCode: 7n,
+      salt: institutionSalt,
+    });
+  const importDependencies = (runtime, receipt, ledger, overrides = {}) => ({
+    readSecrets: async () => ({
+      privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+      walletSeed: new Uint8Array(32).fill(6),
+    }),
+    promptSecret: async () => receipt,
+    createRuntime: async () => runtime,
+    readLedger: async () => ledger,
+    writeBackup: async () => '/ignored/import-enrollment.json',
+    ...overrides,
+  });
+
+  test('imports the institution receipt into private state without syncing a wallet', async () => {
+    const privateState = unenrolledState();
     const { calls, getStoredPrivateState, runtime } = createCommandRuntime(privateState);
-    const contractAddress = sampleContractAddress();
-    const promptedValues = ['2', '350', '7'];
-    let promptIndex = 0;
-
-    const result = await runEnrollApplicantCommand(
+    const { enrollmentLeaf, receipt } = issueFor(privateState.applicantSecret);
+    const result = await runImportEnrollmentCommand(
       loadCliConfig({ environment: {} }),
-      contractAddress,
-      enrollPrompts,
-      {
-        runPrerequisiteChecks: async () => readyChecks,
-        readSecrets: async () => ({
-          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
-          walletSeed: new Uint8Array(32).fill(6),
-        }),
-        promptSecret: async () => promptedValues[promptIndex++],
-        createRuntime: async () => runtime,
-        writeBackup: async () => {
-          calls.push('backup');
-          return '/ignored/enroll-applicant.json';
+      sampleContractAddress(),
+      importDependencies(
+        runtime,
+        receipt,
+        ledgerFixture({ roundId, enrolledLeaves: [enrollmentLeaf] }),
+        {
+          writeBackup: async () => {
+            calls.push('backup');
+            return '/ignored/import-enrollment.json';
+          },
         },
-      },
+      ),
     );
 
-    const expectedLeaf = deriveApplicantLeaf(
-      2n,
-      350n,
-      7n,
-      privateState.applicantSecret,
-      privateState.applicantSalt,
-    );
-
-    assert.equal(result.enrollmentLeaf, Buffer.from(expectedLeaf).toString('hex'));
-    assert.equal(result.backupPath, '/ignored/enroll-applicant.json');
+    assert.equal(result.enrolledOnChain, true);
+    assert.equal(result.enrollmentLeaf, hexKey(enrollmentLeaf));
+    assert.equal(result.applicantId, hexKey(deriveApplicantId(privateState.applicantSecret)));
     assert.equal(getStoredPrivateState().applicantIncomeBand, 2n);
     assert.equal(getStoredPrivateState().applicantGpaScaled, 350n);
     assert.equal(getStoredPrivateState().applicantRegionCode, 7n);
     assert.deepEqual(
       Array.from(getStoredPrivateState().applicantSalt),
-      Array.from(privateState.applicantSalt),
+      Array.from(institutionSalt),
     );
-    assert.deepEqual(calls, ['start', 'set-private-state', 'backup', 'close']);
+    assert.deepEqual(calls, ['set-private-state', 'backup', 'close']);
   });
 
-  test('does not enroll without local private state', async () => {
-    const { calls, runtime } = createCommandRuntime();
-    const contractAddress = sampleContractAddress();
+  test('reports a valid receipt whose registration is not on chain yet', async () => {
+    const privateState = unenrolledState();
+    const { runtime } = createCommandRuntime(privateState);
+    const { receipt } = issueFor(privateState.applicantSecret);
+    const result = await runImportEnrollmentCommand(
+      loadCliConfig({ environment: {} }),
+      sampleContractAddress(),
+      importDependencies(runtime, receipt, ledgerFixture({ roundId })),
+    );
+
+    assert.equal(result.enrolledOnChain, false);
+  });
+
+  test('refuses a receipt issued for another applicant, leaving private state untouched', async () => {
+    const privateState = unenrolledState();
+    const { calls, runtime } = createCommandRuntime(privateState);
+    const { receipt } = issueFor(new Uint8Array(32).fill(0x77));
 
     await assert.rejects(
-      runEnrollApplicantCommand(
+      runImportEnrollmentCommand(
         loadCliConfig({ environment: {} }),
-        contractAddress,
-        enrollPrompts,
-        {
-          runPrerequisiteChecks: async () => readyChecks,
-          readSecrets: async () => ({
-            privateStatePassword: 'R7!mQ2@vL9#zT4$p',
-            walletSeed: new Uint8Array(32).fill(9),
+        sampleContractAddress(),
+        importDependencies(runtime, receipt, ledgerFixture({ roundId })),
+      ),
+      (error) =>
+        /different applicant/.test(error.message) &&
+        !error.message.includes(hexKey(institutionSalt)),
+    );
+    assert.equal(calls.includes('set-private-state'), false);
+    assert.equal(calls.at(-1), 'close');
+  });
+
+  test('refuses to change the enrollment after the applicant has applied or review opened', async () => {
+    const privateState = unenrolledState();
+    const { receipt } = issueFor(privateState.applicantSecret);
+    const applied = createCommandRuntime(privateState);
+
+    await assert.rejects(
+      runImportEnrollmentCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        importDependencies(
+          applied.runtime,
+          receipt,
+          ledgerFixture({
+            roundId,
+            phase: 1,
+            applyNullifiers: [deriveApplyNullifier(roundId, privateState.applicantSecret)],
           }),
-          promptSecret: async () => '2',
-          createRuntime: async () => runtime,
-        },
+        ),
+      ),
+      /already applied to the round/,
+    );
+
+    const reviewing = createCommandRuntime(privateState);
+
+    await assert.rejects(
+      runImportEnrollmentCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        importDependencies(reviewing.runtime, receipt, ledgerFixture({ roundId, phase: 2 })),
+      ),
+      /before review opens/,
+    );
+    assert.equal(applied.calls.includes('set-private-state'), false);
+    assert.equal(reviewing.calls.includes('set-private-state'), false);
+  });
+
+  test('does not import a receipt without local private state', async () => {
+    const { calls, runtime } = createCommandRuntime();
+
+    await assert.rejects(
+      runImportEnrollmentCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        importDependencies(runtime, 'aequira-enrollment:v1', ledgerFixture({ roundId })),
       ),
       /run join before submitting a contract call/,
     );
     assert.equal(calls.at(-1), 'close');
   });
 
-  test('preserves enrollment identity when backup creation fails', async () => {
-    const privateState = privateStateFixture();
-    const { runtime } = createCommandRuntime(privateState);
-    const contractAddress = sampleContractAddress();
+  test('keeps the imported enrollment when backup creation fails', async () => {
+    const privateState = unenrolledState();
+    const { getStoredPrivateState, runtime } = createCommandRuntime(privateState);
+    const { receipt } = issueFor(privateState.applicantSecret);
 
     await assert.rejects(
-      runEnrollApplicantCommand(
+      runImportEnrollmentCommand(
         loadCliConfig({ environment: {} }),
-        contractAddress,
-        enrollPrompts,
-        {
-          runPrerequisiteChecks: async () => readyChecks,
-          readSecrets: async () => ({
-            privateStatePassword: 'R7!mQ2@vL9#zT4$p',
-            walletSeed: new Uint8Array(32).fill(9),
-          }),
-          promptSecret: async () => '2',
-          createRuntime: async () => runtime,
+        sampleContractAddress(),
+        importDependencies(runtime, receipt, ledgerFixture({ roundId }), {
           writeBackup: async () => {
             throw new Error('/local/private-state/backup failed');
           },
-        },
+        }),
       ),
       (error) =>
         error instanceof EnrollmentBackupError &&
         error.message.includes('Preserve the private-state directory') &&
         !error.message.includes('/local/private-state'),
     );
+    assert.equal(getStoredPrivateState().applicantIncomeBand, 2n);
+  });
+
+  test('refuses to apply before an enrollment receipt is imported', async () => {
+    const { calls, runtime } = createCommandRuntime(unenrolledState());
+
+    await assert.rejects(
+      runApplyCommand(loadCliConfig({ environment: {} }), sampleContractAddress(), {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(7),
+        }),
+        createRuntime: async () => runtime,
+        readLedger: async () => ledgerFixture({ roundId, phase: 1 }),
+        joinContract: async () => ({
+          callTx: {
+            apply: async () => {
+              calls.push('must-not-apply');
+              return { public: finalizedPublicData };
+            },
+          },
+        }),
+      }),
+      /run import-enrollment first/,
+    );
+    assert.equal(calls.includes('must-not-apply'), false);
+  });
+
+  test('refuses a second application and names the one already submitted', async () => {
+    const privateState = privateStateFixture();
+    const { calls, runtime } = createCommandRuntime(privateState);
+    const nonce = await deriveApplicationNonce(roundId, privateState.applicantSecret);
+    const applicationId = hexKey(
+      deriveApplicationPseudonym(roundId, privateState.applicantSecret, nonce),
+    );
+
+    await assert.rejects(
+      runApplyCommand(loadCliConfig({ environment: {} }), sampleContractAddress(), {
+        runPrerequisiteChecks: async () => readyChecks,
+        readSecrets: async () => ({
+          privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+          walletSeed: new Uint8Array(32).fill(7),
+        }),
+        createRuntime: async () => runtime,
+        readLedger: async () =>
+          ledgerFixture({
+            roundId,
+            phase: 1,
+            applyNullifiers: [deriveApplyNullifier(roundId, privateState.applicantSecret)],
+          }),
+        joinContract: async () => ({
+          callTx: {
+            apply: async () => {
+              calls.push('must-not-apply');
+              return { public: finalizedPublicData };
+            },
+          },
+        }),
+      }),
+      new RegExp(`already applied to the round as application ${applicationId}`),
+    );
+    assert.equal(calls.includes('must-not-apply'), false);
   });
 
   test('submits an application deriving the nonce from the round and the applicant secret', async () => {
@@ -1299,7 +1568,7 @@ describe('AEQUIRA CLI applicant commands', () => {
         walletSeed: new Uint8Array(32).fill(7),
       }),
       createRuntime: async () => runtime,
-      readRoundId: async () => roundId,
+      readLedger: async () => ledgerFixture({ roundId, phase: 1 }),
       joinContract: async () => ({
         callTx: {
           apply: async (submittedNonce) => {
@@ -1315,10 +1584,13 @@ describe('AEQUIRA CLI applicant commands', () => {
       },
     });
 
+    const expectedNonce = await deriveApplicationNonce(roundId, privateState.applicantSecret);
+
     assert.equal(result.transactionId, 'tx-id-1');
-    assert.deepEqual(
-      Array.from(capturedNonce),
-      Array.from(await deriveApplicationNonce(roundId, privateState.applicantSecret)),
+    assert.deepEqual(Array.from(capturedNonce), Array.from(expectedNonce));
+    assert.equal(
+      result.applicationId,
+      hexKey(deriveApplicationPseudonym(roundId, privateState.applicantSecret, expectedNonce)),
     );
     assert.deepEqual(calls, ['start', 'funding', 'apply', 'backup', 'close']);
   });
@@ -1335,7 +1607,7 @@ describe('AEQUIRA CLI applicant commands', () => {
           walletSeed: new Uint8Array(32).fill(9),
         }),
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () => ledgerFixture({ roundId, phase: 1 }),
         joinContract: async () => ({
           callTx: {
             apply: async () => {
@@ -1354,6 +1626,19 @@ describe('AEQUIRA CLI applicant commands', () => {
 
 describe('AEQUIRA CLI score commands', () => {
   const roundId = new Uint8Array(32).fill(6);
+  // The commitment a reviewer's own opening produces, as the ledger records it.
+  const commitmentFor = async (
+    applicationId,
+    score,
+    reviewerSecret = privateStateFixture().reviewerSecret,
+  ) =>
+    deriveScoreCommitment(
+      roundId,
+      applicationId,
+      score,
+      reviewerSecret,
+      await deriveScoreSalt(roundId, applicationId, reviewerSecret),
+    );
 
   test('commits a masked score, deriving its salt from the round and application', async () => {
     const privateState = privateStateFixture();
@@ -1374,7 +1659,7 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () => ledgerFixture({ roundId, phase: 2, applications: [applicationId] }),
         joinContract: async () => ({
           callTx: {
             commitScore: async (submittedApplicationId) => {
@@ -1450,7 +1735,12 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () =>
+          ledgerFixture({
+            roundId,
+            phase: 3,
+            scoreCommitments: [await commitmentFor(applicationId, 87n)],
+          }),
         joinContract: async () => ({
           callTx: {
             revealScore: async (submittedApplicationId) => {
@@ -1500,7 +1790,7 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () => ledgerFixture({ roundId, phase: 3 }),
         joinContract: async () => ({
           callTx: {
             revealScore: async () => {
@@ -1530,7 +1820,12 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () =>
+          ledgerFixture({
+            roundId,
+            phase: 3,
+            scoreCommitments: [await commitmentFor(new Uint8Array(32).fill(0xcd), 87n)],
+          }),
         joinContract: async () => ({
           callTx: {
             revealScore: async () => ({ public: finalizedPublicData }),
@@ -1569,7 +1864,8 @@ describe('AEQUIRA CLI score commands', () => {
       }),
       promptSecret: async () => score,
       createRuntime: async () => runtime,
-      readRoundId: async () => roundId,
+      readLedger: async () =>
+        ledgerFixture({ roundId, phase: 2, applications: [applicationA, applicationB] }),
       joinContract: async () => ({
         callTx: {
           commitScore: async () => ({ public: finalizedPublicData }),
@@ -1610,7 +1906,12 @@ describe('AEQUIRA CLI score commands', () => {
         }),
         promptSecret: async () => '60',
         createRuntime: async () => runtime,
-        readRoundId: async () => roundId,
+        readLedger: async () =>
+          ledgerFixture({
+            roundId,
+            phase: 3,
+            scoreCommitments: [await commitmentFor(applicationA, 60n, reviewerSecret)],
+          }),
         joinContract: async () => ({
           callTx: {
             revealScore: async () => ({ public: finalizedPublicData }),
@@ -1622,6 +1923,177 @@ describe('AEQUIRA CLI score commands', () => {
 
     assert.equal(revealResult.transactionId, 'tx-id-1');
     assert.deepEqual(Array.from(getStoredPrivateState().scoreSalt), Array.from(saltAfterA));
+  });
+
+  const scoreDependencies = (runtime, calls, ledger, prompts = ['87', '87']) => {
+    let promptIndex = 0;
+    return {
+      runPrerequisiteChecks: async () => readyChecks,
+      readSecrets: async () => ({
+        privateStatePassword: 'R7!mQ2@vL9#zT4$p',
+        walletSeed: new Uint8Array(32).fill(7),
+      }),
+      promptSecret: async () => prompts[promptIndex++],
+      createRuntime: async () => {
+        calls.push('runtime');
+        return runtime;
+      },
+      readLedger: async () => ledger,
+      joinContract: async () => ({
+        callTx: {
+          commitScore: async () => {
+            calls.push('must-not-submit');
+            return { public: finalizedPublicData };
+          },
+          revealScore: async () => {
+            calls.push('must-not-submit');
+            return { public: finalizedPublicData };
+          },
+        },
+      }),
+    };
+  };
+
+  test('refuses to commit a score for an ID that is not a submitted application', async () => {
+    // The nullifier would make a mistyped ID permanent, and after the contract
+    // fix such a commitment could never be revealed.
+    const { calls, runtime } = createCommandRuntime(privateStateFixture());
+
+    await assert.rejects(
+      runCommitScoreCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        'ab'.repeat(32),
+        scoreDependencies(runtime, calls, ledgerFixture({ roundId, phase: 2 })),
+      ),
+      /not a submitted application in this round/,
+    );
+    assert.equal(calls.includes('set-private-state'), false);
+    assert.equal(calls.includes('must-not-submit'), false);
+  });
+
+  test('refuses to commit twice for the same application', async () => {
+    const privateState = privateStateFixture();
+    const applicationId = new Uint8Array(32).fill(0xab);
+    const { calls, runtime } = createCommandRuntime(privateState);
+
+    await assert.rejects(
+      runCommitScoreCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        'ab'.repeat(32),
+        scoreDependencies(
+          runtime,
+          calls,
+          ledgerFixture({
+            roundId,
+            phase: 2,
+            applications: [applicationId],
+            scoreNullifiers: [
+              deriveScoreNullifier(roundId, applicationId, privateState.reviewerSecret),
+            ],
+          }),
+        ),
+      ),
+      /already committed a score for that application/,
+    );
+    assert.equal(calls.includes('must-not-submit'), false);
+  });
+
+  test('refuses a commit whose score confirmation does not match, before opening a wallet', async () => {
+    const { calls, runtime } = createCommandRuntime(privateStateFixture());
+
+    await assert.rejects(
+      runCommitScoreCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        'ab'.repeat(32),
+        scoreDependencies(runtime, calls, ledgerFixture({ roundId, phase: 2 }), ['85', '58']),
+      ),
+      (error) => /do not match/.test(error.message) && !/85|58/.test(error.message),
+    );
+    assert.equal(calls.includes('runtime'), false);
+  });
+
+  test('refuses to reveal a score that does not open the recorded commitment', async () => {
+    const { calls, runtime } = createCommandRuntime(privateStateFixture());
+    const applicationId = new Uint8Array(32).fill(0xcd);
+
+    await assert.rejects(
+      runRevealScoreCommand(
+        loadCliConfig({ environment: {} }),
+        sampleContractAddress(),
+        'cd'.repeat(32),
+        scoreDependencies(
+          runtime,
+          calls,
+          ledgerFixture({
+            roundId,
+            phase: 3,
+            scoreCommitments: [await commitmentFor(applicationId, 85n)],
+          }),
+          ['58'],
+        ),
+      ),
+      /does not open a commitment recorded for this application/,
+    );
+    assert.equal(calls.includes('set-private-state'), false);
+    assert.equal(calls.includes('must-not-submit'), false);
+  });
+});
+
+describe('AEQUIRA CLI round status', () => {
+  const roundId = new Uint8Array(32).fill(6);
+  const revealed = new Uint8Array(32).fill(0xaa);
+  const sealed = new Uint8Array(32).fill(0xbb);
+  const reviewer = new Uint8Array(32).fill(0xcc);
+  const ledger = ledgerFixture({
+    roundId,
+    phase: 3,
+    applications: [revealed, sealed],
+    applyNullifiers: [new Uint8Array(32).fill(1), new Uint8Array(32).fill(2)],
+    enrolledLeaves: [new Uint8Array(32).fill(3), new Uint8Array(32).fill(4)],
+    reviewers: [reviewer],
+    revealedCounts: [[revealed, 1n]],
+    scoreCommitments: [new Uint8Array(32).fill(5)],
+    scoreNullifiers: [new Uint8Array(32).fill(7), new Uint8Array(32).fill(8)],
+    scoreSums: [[revealed, 87n]],
+  });
+
+  test('summarizes the public ledger, listing every submitted application', () => {
+    assert.deepEqual(toRoundStatus(ledger), {
+      applications: [
+        { applicationId: hexKey(revealed), revealedCount: '1', scoreSum: '87' },
+        { applicationId: hexKey(sealed), revealedCount: null, scoreSum: null },
+      ],
+      applyNullifiers: '2',
+      enrollmentLeaves: '2',
+      maxIncomeBand: '3',
+      minGpaScaled: '300',
+      phase: 'REVEAL',
+      reviewers: [hexKey(reviewer)],
+      scoreCommitments: '1',
+      scoreNullifiers: '2',
+    });
+  });
+
+  test('reads the ledger without asking for any secret', async () => {
+    let readSecrets = false;
+    const status = await runRoundStatusCommand(
+      loadCliConfig({ environment: {} }),
+      sampleContractAddress(),
+      {
+        createPublicDataProvider: () => ({ publicDataProvider: {} }),
+        readLedger: async () => ledger,
+        readSecrets: async () => {
+          readSecrets = true;
+          throw new Error('must not run');
+        },
+      },
+    );
+
+    assert.equal(status.phase, 'REVEAL');
+    assert.equal(readSecrets, false);
   });
 });
 
