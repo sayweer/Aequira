@@ -10,7 +10,7 @@ and the tally is publicly verifiable once it is opened.
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Live demo**        | `TODO_DEMO_URL`                                                                                                                    |
 | **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                              |
-| **Preprod contract** | `TODO_CONTRACT_ADDRESS`                                                                                                            |
+| **Preprod contract** | `3f390d6c373fcc40223dd0539e1ae1b73de7904ad55adf7db7e0de83823ad7c2`                                                                 |
 | **Network**          | Midnight Preprod                                                                                                                   |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
 | **Tests**            | 166 (`pnpm test`)                                                                                                                  |
