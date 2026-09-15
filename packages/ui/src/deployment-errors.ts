@@ -359,7 +359,7 @@ export const toCircuitErrorMessage = (error: unknown): string => {
     return 'The encrypted browser storage could not be read or updated. Confirm browser storage is enabled and that this browser joined the round.';
   }
   if (stage === 'contract-join') {
-    return 'This browser could not join that contract. It may hold no reviewer secret for that address, or the address may not be an AEQUIRA round.';
+    return 'This browser could not join that contract. The address may not be an AEQUIRA round on Preprod, or it may be a round deployed by an older AEQUIRA build.';
   }
   if (stage === 'ledger-query') {
     return 'The public round state could not be read from the indexer. It may still be catching up; this retries automatically.';

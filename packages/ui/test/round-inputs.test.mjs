@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import {
   parseApplicantAttributes,
+  parseApplicantId,
   parseApplicationId,
   parseContractAddressInput,
   parseEligibilityThresholds,
-  parseEnrollmentLeaf,
   parseReviewerId,
   parseScore,
 } from '../.test-build/round-inputs.js';
@@ -34,8 +34,8 @@ test('reports reviewer identifiers under their own label', () => {
 });
 
 test('reports enrollment leaves under their own label', () => {
-  assert.equal(parseEnrollmentLeaf(VALID_HEX), VALID_HEX);
-  assert.throws(() => parseEnrollmentLeaf('abc'), /enrollment leaf must be exactly 64/);
+  assert.equal(parseApplicantId(VALID_HEX), VALID_HEX);
+  assert.throws(() => parseApplicantId('abc'), /applicant ID must be exactly 64/);
 });
 
 test('accepts whole scores within the rubric range', () => {

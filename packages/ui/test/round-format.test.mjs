@@ -6,11 +6,26 @@ import {
   hexToBytes,
   phaseLabel,
   shortenHex,
+  toLocalStatus,
   toRoundView,
 } from '../.test-build/round-format.js';
 
 const APPLICATION_A = 'a1'.repeat(32);
 const APPLICATION_B = 'b2'.repeat(32);
+const ADMIN_ID = 'cd'.repeat(32);
+const REVIEWER_ID = '11'.repeat(32);
+const APPLY_NULLIFIER = '77'.repeat(32);
+const ENROLLMENT_LEAF = '88'.repeat(32);
+
+const identity = (overrides = {}) => ({
+  adminIdHex: ADMIN_ID,
+  applicantIdHex: '99'.repeat(32),
+  applicationIdHex: APPLICATION_A,
+  applyNullifierHex: APPLY_NULLIFIER,
+  enrollmentLeafHex: ENROLLMENT_LEAF,
+  reviewerIdHex: REVIEWER_ID,
+  ...overrides,
+});
 
 /** Mirrors the generated ledger Set: iterable, with a byte-wise `member`. */
 const createSet = (hexes) => {
@@ -42,8 +57,18 @@ const createCounterMap = (entries) => ({
   size: () => BigInt(Object.keys(entries).length),
 });
 
+/** Mirrors the generated MerkleTree: a path exists only for a registered leaf. */
+const createTree = (leafHexes) => ({
+  firstFree: () => BigInt(leafHexes.length),
+  findPathForLeaf: (leaf) =>
+    leafHexes.includes(bytesToHex(leaf)) ? { leaf, path: [] } : undefined,
+});
+
 const createLedger = (overrides = {}) => ({
   adminAuthority: hexToBytes('cd'.repeat(32)),
+  applicantTree: createTree([]),
+  applications: createSet([]),
+  applyNullifiers: createSet([]),
   maxIncomeBand: 3n,
   minGpaScaled: 300n,
   phase: 2,
@@ -90,7 +115,6 @@ test('enumerates the ledger sets and counts nullifiers', () => {
       scoreCommitments: createSet(['33'.repeat(32)]),
       scoreNullifiers: createSet(['44'.repeat(32), '55'.repeat(32), '66'.repeat(32)]),
     }),
-    [],
   );
 
   assert.deepEqual(view.reviewerIdHexes, ['11'.repeat(32), '22'.repeat(32)]);
@@ -101,7 +125,7 @@ test('enumerates the ledger sets and counts nullifiers', () => {
 });
 
 test('carries the eligibility rules the round announced', () => {
-  const view = toRoundView(createLedger({ maxIncomeBand: 4n, minGpaScaled: 275n }), []);
+  const view = toRoundView(createLedger({ maxIncomeBand: 4n, minGpaScaled: 275n }));
 
   assert.equal(view.maxIncomeBand, 4);
   assert.equal(view.minGpaScaled, 275);
@@ -110,10 +134,10 @@ test('carries the eligibility rules the round announced', () => {
 test('reads a tally for an application that has revealed scores', () => {
   const view = toRoundView(
     createLedger({
+      applications: createSet([APPLICATION_A]),
       revealedCounts: createCounterMap({ [APPLICATION_A]: 2 }),
       scoreSums: createCounterMap({ [APPLICATION_A]: 173 }),
     }),
-    [APPLICATION_A],
   );
 
   assert.deepEqual(view.tallies, [
@@ -121,13 +145,13 @@ test('reads a tally for an application that has revealed scores', () => {
   ]);
 });
 
-test('returns nulls instead of throwing for an application absent from the maps', () => {
+test('lists every submitted application, with nulls for one no one has revealed', () => {
   const view = toRoundView(
     createLedger({
+      applications: createSet([APPLICATION_A, APPLICATION_B]),
       revealedCounts: createCounterMap({ [APPLICATION_A]: 1 }),
       scoreSums: createCounterMap({ [APPLICATION_A]: 93 }),
     }),
-    [APPLICATION_A, APPLICATION_B],
   );
 
   assert.deepEqual(view.tallies, [
@@ -139,13 +163,70 @@ test('returns nulls instead of throwing for an application absent from the maps'
 test('produces a view that survives JSON serialization', () => {
   const view = toRoundView(
     createLedger({
+      applications: createSet([APPLICATION_A]),
       reviewers: createSet(['11'.repeat(32)]),
       scoreSums: createCounterMap({ [APPLICATION_A]: 93 }),
     }),
-    [APPLICATION_A],
+    identity(),
   );
 
   // Counts arrive from the ledger as bigint; JSON.stringify throws on those, so
   // toRoundView has to convert them before the privacy panel renders anything.
   assert.doesNotThrow(() => JSON.stringify(view));
+});
+
+test('ignores the applications a stale browser might remember and trusts the ledger', () => {
+  // Earlier builds kept application IDs in storage per network, so one round's
+  // IDs leaked into the next. The view is built from the ledger alone now.
+  const view = toRoundView(createLedger({ applications: createSet([APPLICATION_B]) }));
+
+  assert.deepEqual(
+    view.tallies.map((tally) => tally.applicationIdHex),
+    [APPLICATION_B],
+  );
+});
+
+test('counts the enrollment leaves the institution registered', () => {
+  const view = toRoundView(
+    createLedger({ applicantTree: createTree(['01'.repeat(32), '02'.repeat(32)]) }),
+  );
+
+  assert.equal(view.enrollmentLeafCount, 2);
+});
+
+test('places this browser in the round from one-way values only', () => {
+  const ledger = createLedger({
+    applicantTree: createTree([ENROLLMENT_LEAF]),
+    applyNullifiers: createSet([APPLY_NULLIFIER]),
+    reviewers: createSet([REVIEWER_ID]),
+  });
+
+  assert.deepEqual(toLocalStatus(ledger, identity()), {
+    applicantIdHex: '99'.repeat(32),
+    applicationIdHex: APPLICATION_A,
+    enrolledOnChain: true,
+    hasApplied: true,
+    isAdmin: true,
+    isRegisteredReviewer: true,
+    receiptImported: true,
+    reviewerIdHex: REVIEWER_ID,
+  });
+});
+
+test('withholds the application ID until it is on the ledger, and reports a missing receipt', () => {
+  const status = toLocalStatus(
+    createLedger({ adminAuthority: hexToBytes('ee'.repeat(32)) }),
+    identity({ enrollmentLeafHex: null }),
+  );
+
+  assert.equal(status.applicationIdHex, null);
+  assert.equal(status.hasApplied, false);
+  assert.equal(status.receiptImported, false);
+  assert.equal(status.enrolledOnChain, false);
+  assert.equal(status.isAdmin, false);
+  assert.equal(status.isRegisteredReviewer, false);
+});
+
+test('attaches no local status when the browser holds no private state', () => {
+  assert.equal(toRoundView(createLedger()).local, null);
 });

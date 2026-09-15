@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRoundDisclosure, serializePublicLedger } from '../.test-build/privacy-view.js';
+import {
+  buildRoundDisclosure,
+  scoreStage,
+  serializePublicLedger,
+} from '../.test-build/privacy-view.js';
 
 // A commitment that contains no '93' substring, so the assertion below is about
 // the score being withheld rather than about a coincidence.
@@ -13,7 +17,6 @@ const ROUND = 'ef'.repeat(32);
 const committed = (overrides = {}) => ({
   applicationIdHex: APPLICATION,
   commitmentHex: COMMITMENT,
-  commitmentOnChain: true,
   maxIncomeBand: 3,
   minGpaScaled: 320,
   nullifierHex: NULLIFIER,
@@ -21,6 +24,7 @@ const committed = (overrides = {}) => ({
   revealedCount: null,
   roundIdHex: ROUND,
   score: 93,
+  scoreStage: 'sealed',
   scoreSum: null,
   ...overrides,
 });
@@ -55,7 +59,15 @@ test('scopes each value to the side it belongs on', () => {
 
   assert.deepEqual(
     disclosure.local.map((row) => row.label),
-    ['Score', 'Score salt', 'Reviewer secret', 'Reviewer pseudonym', 'Administrator secret'],
+    [
+      'Score',
+      'Score salt',
+      'Reviewer secret',
+      'Reviewer pseudonym',
+      'Administrator secret',
+      'Applicant attributes',
+      'Applicant secret',
+    ],
   );
   assert.deepEqual(
     disclosure.public.map((row) => row.label),
@@ -83,6 +95,8 @@ test('never places the salt or a secret value in a row', () => {
     'Reviewer secret',
     'Reviewer pseudonym',
     'Administrator secret',
+    'Applicant attributes',
+    'Applicant secret',
   ]) {
     const row = disclosure.local.find((entry) => entry.label === label);
     assert.equal(row.value, 'held in this browser');
@@ -106,10 +120,10 @@ test('reports the pre-commit state without inventing values', () => {
     committed({
       applicationIdHex: null,
       commitmentHex: null,
-      commitmentOnChain: false,
       nullifierHex: null,
       phaseLabel: 'Setup',
       score: null,
+      scoreStage: 'none',
     }),
   );
   const blob = serializePublicLedger(disclosure);
@@ -119,7 +133,7 @@ test('reports the pre-commit state without inventing values', () => {
 });
 
 test('distinguishes a commitment that is on chain from one that is not', () => {
-  const pending = buildRoundDisclosure(committed({ commitmentOnChain: false })).public.find(
+  const pending = buildRoundDisclosure(committed({ scoreStage: 'pending' })).public.find(
     (row) => row.label === 'Score commitment',
   );
   const settled = buildRoundDisclosure(committed()).public.find(
@@ -159,4 +173,36 @@ test('states the eligibility rules publicly and the figures behind them nowhere'
     disclosure.local.some((row) => row.label === 'Eligibility rules'),
     false,
   );
+});
+
+test('tells a sealed, a pending and an opened score apart', () => {
+  const last = {
+    applicationIdHex: APPLICATION,
+    commitmentHex: COMMITMENT,
+    nullifierHex: NULLIFIER,
+    score: 93,
+  };
+
+  assert.equal(scoreStage(null, [COMMITMENT]), 'none');
+  assert.equal(scoreStage({ ...last, stage: 'committed' }, []), 'pending');
+  assert.equal(scoreStage({ ...last, stage: 'committed' }, [COMMITMENT]), 'sealed');
+  // Reveal removes the commitment from the set; that must not read as pending.
+  assert.equal(scoreStage({ ...last, stage: 'revealed' }, []), 'opened');
+});
+
+test('describes an opened commitment instead of waiting for it forever', () => {
+  const opened = buildRoundDisclosure(committed({ scoreStage: 'opened', scoreSum: 93 }));
+
+  assert.match(
+    opened.public.find((row) => row.label === 'Score commitment').detail,
+    /Opened during reveal/,
+  );
+  assert.match(opened.local.find((row) => row.label === 'Score').detail, /Revealed on purpose/);
+});
+
+test('never places an applicant attribute on the public side', () => {
+  const blob = serializePublicLedger(buildRoundDisclosure(committed()));
+
+  assert.ok(!blob.includes('Applicant attributes'));
+  assert.ok(!blob.includes('Applicant secret'));
 });

@@ -14,6 +14,7 @@
     "src/privacy-view.ts",
     "src/proof-mode.ts",
     "src/provider-security.ts",
+    "src/round-actions.ts",
     "src/round-format.ts",
     "src/round-inputs.ts",
     "src/session-storage.ts",

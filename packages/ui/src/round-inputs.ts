@@ -52,8 +52,7 @@ export const parseApplicationId = (value: string): string =>
 
 export const parseReviewerId = (value: string): string => parseHex32(value, 'a', 'reviewer ID');
 
-export const parseEnrollmentLeaf = (value: string): string =>
-  parseHex32(value, 'an', 'enrollment leaf');
+export const parseApplicantId = (value: string): string => parseHex32(value, 'an', 'applicant ID');
 
 export const parseScore = (value: string): number => {
   const trimmed = value.trim();
@@ -117,9 +116,9 @@ export const parseEligibilityThresholds = (
 });
 
 /**
- * An applicant's own attributes, as `applicantLeaf` and `apply`'s witnesses
- * take them. Kept separate from `EligibilityThresholds`: these are the private
- * values measured against those public rules, not the rules themselves.
+ * An applicant's attributes, as the institution verified them and `apply`'s
+ * witnesses take them. Kept separate from `EligibilityThresholds`: these are the
+ * private values measured against those public rules, not the rules themselves.
  */
 export type ApplicantAttributes = {
   readonly gpaScaled: bigint;

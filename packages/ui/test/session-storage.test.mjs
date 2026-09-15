@@ -38,28 +38,6 @@ test('round-trips the contract address', () => {
   assert.equal(store.read().contractAddress, ADDRESS);
 });
 
-test('round-trips application identifiers without duplicates', () => {
-  const storage = createStorage();
-  const store = createRoundMemoryStore(() => storage, 'preprod');
-
-  store.addApplicationId(APPLICATION_A);
-  store.addApplicationId(APPLICATION_B);
-  store.addApplicationId(APPLICATION_A);
-
-  assert.deepEqual(store.read().applicationIdHexes, [APPLICATION_A, APPLICATION_B]);
-});
-
-test('ignores application identifiers that are not 32-byte hex', () => {
-  const storage = createStorage();
-  const store = createRoundMemoryStore(() => storage, 'preprod');
-
-  store.addApplicationId('not-hex');
-  store.addApplicationId('a1'.repeat(31));
-  store.addApplicationId(`0x${APPLICATION_A}`);
-
-  assert.deepEqual(store.read().applicationIdHexes, []);
-});
-
 test('tolerates corrupted storage instead of throwing', () => {
   const storage = createStorage({
     'aequira:preprod:application-ids': '{not json',
@@ -67,16 +45,7 @@ test('tolerates corrupted storage instead of throwing', () => {
   });
   const store = createRoundMemoryStore(() => storage, 'preprod');
 
-  assert.deepEqual(store.read(), { applicationIdHexes: [], contractAddress: null });
-});
-
-test('drops non-hex entries found inside otherwise valid stored JSON', () => {
-  const storage = createStorage({
-    'aequira:preprod:application-ids': JSON.stringify([APPLICATION_A, 42, 'nope', null]),
-  });
-  const store = createRoundMemoryStore(() => storage, 'preprod');
-
-  assert.deepEqual(store.read().applicationIdHexes, [APPLICATION_A]);
+  assert.deepEqual(store.read(), { contractAddress: null });
 });
 
 test('returns empty memory when storage itself is unavailable', () => {
@@ -91,7 +60,7 @@ test('returns empty memory when storage itself is unavailable', () => {
     'preprod',
   );
 
-  assert.deepEqual(store.read(), { applicationIdHexes: [], contractAddress: null });
+  assert.deepEqual(store.read(), { contractAddress: null });
 });
 
 test('keeps working when merely reaching storage throws, as with blocked site data', () => {
@@ -101,9 +70,8 @@ test('keeps working when merely reaching storage throws, as with blocked site da
   }, 'preprod');
 
   assert.doesNotThrow(() => store.saveContractAddress(ADDRESS));
-  assert.doesNotThrow(() => store.addApplicationId(APPLICATION_A));
   assert.doesNotThrow(() => store.clear());
-  assert.deepEqual(store.read(), { applicationIdHexes: [], contractAddress: null });
+  assert.deepEqual(store.read(), { contractAddress: null });
 });
 
 test('does not throw when a write fails, as with a full quota', () => {
@@ -119,20 +87,20 @@ test('does not throw when a write fails, as with a full quota', () => {
   const store = createRoundMemoryStore(() => storage, 'preprod');
 
   assert.doesNotThrow(() => store.saveContractAddress(ADDRESS));
-  assert.doesNotThrow(() => store.addApplicationId(APPLICATION_A));
   assert.doesNotThrow(() => store.clear());
 });
 
-test('clear removes both keys', () => {
-  const storage = createStorage();
+test('clear removes the address and the application IDs earlier builds stored', () => {
+  const storage = createStorage({
+    'aequira:preprod:application-ids': JSON.stringify([APPLICATION_A, APPLICATION_B]),
+  });
   const store = createRoundMemoryStore(() => storage, 'preprod');
 
   store.saveContractAddress(ADDRESS);
-  store.addApplicationId(APPLICATION_A);
   store.clear();
 
   assert.equal(storage.entries.size, 0);
-  assert.deepEqual(store.read(), { applicationIdHexes: [], contractAddress: null });
+  assert.deepEqual(store.read(), { contractAddress: null });
 });
 
 test('persists nothing beyond the public round coordinates', () => {
@@ -140,7 +108,6 @@ test('persists nothing beyond the public round coordinates', () => {
   const store = createRoundMemoryStore(() => storage, 'preprod');
 
   store.saveContractAddress(ADDRESS);
-  store.addApplicationId(APPLICATION_A);
 
   const persisted = JSON.stringify([...storage.entries]);
 

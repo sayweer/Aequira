@@ -7,15 +7,22 @@
 
 import {
   AEQUIRA_PRIVATE_STATE_ID,
+  EnrollmentReceiptError,
   createAequiraPrivateState,
+  deriveAdminId,
   deriveApplicantId,
   deriveApplicantLeaf,
   deriveApplicationNonce,
+  deriveApplicationPseudonym,
+  deriveApplyNullifier,
   deriveReviewerId,
   deriveScoreCommitment,
   deriveScoreNullifier,
   deriveScoreSalt,
+  hasImportedEnrollment,
+  issueEnrollmentReceipt,
   joinAequira,
+  openEnrollmentReceipt,
   queryAequiraLedger,
   readRoundId,
   setAequiraPrivateState,
@@ -30,15 +37,22 @@ import type { FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 import { createBrowserProviderSession, type BrowserProviderSession } from './browser-providers.js';
 import { withDeploymentStage } from './deployment-errors.js';
 import { createRandomPrivateState, deployNewAequira } from './deployment.js';
+import type { LastScore } from './privacy-view.js';
 import type { ProofMode } from './proof-mode.js';
-import { bytesToHex, hexToBytes, toRoundView, type RoundView } from './round-format.js';
 import {
+  bytesToHex,
+  hexToBytes,
+  toRoundView,
+  type LocalIdentity,
+  type RoundView,
+} from './round-format.js';
+import {
+  InputError,
   parseApplicantAttributes,
+  parseApplicantId,
   parseApplicationId,
   parseContractAddressInput,
-  parseEnrollmentLeaf,
   parseReviewerId,
-  type ApplicantAttributes,
   type EligibilityThresholds,
 } from './round-inputs.js';
 
@@ -50,18 +64,6 @@ export type RoundSession = {
   /** Immutable for the lifetime of the round, so it is read once. */
   readonly roundId: Uint8Array;
   close(): Promise<void>;
-};
-
-export type ScoreOpening = {
-  readonly applicationIdHex: string;
-  /** Computed locally before the transaction is built. */
-  readonly commitmentHex: string;
-  readonly nullifierHex: string;
-};
-
-export type CommitScoreResult = {
-  readonly opening: ScoreOpening;
-  readonly tx: FinalizedTxData;
 };
 
 export type ScoreInput = {
@@ -151,14 +153,42 @@ const readPrivateState = async (session: RoundSession): Promise<AequiraPrivateSt
   return privateState;
 };
 
-export const readLocalReviewerIdHex = async (session: RoundSession): Promise<string> => {
+/**
+ * Derives everything the page needs to place this browser in the round, from
+ * its private state, without letting a secret out: every value is a one-way
+ * hash or commitment, and the application pseudonym is shown only once `apply`
+ * has published it.
+ */
+export const readLocalIdentity = async (session: RoundSession): Promise<LocalIdentity> => {
   const privateState = await readPrivateState(session);
-  return bytesToHex(deriveReviewerId(Uint8Array.from(privateState.reviewerSecret)));
-};
+  const applicantSecret = Uint8Array.from(privateState.applicantSecret);
+  const nonce = await deriveApplicationNonce(session.roundId, applicantSecret);
 
-export const readLocalApplicantIdHex = async (session: RoundSession): Promise<string> => {
-  const privateState = await readPrivateState(session);
-  return bytesToHex(deriveApplicantId(Uint8Array.from(privateState.applicantSecret)));
+  try {
+    return {
+      adminIdHex: bytesToHex(deriveAdminId(session.roundId, privateState.adminSecret)),
+      applicantIdHex: bytesToHex(deriveApplicantId(applicantSecret)),
+      applicationIdHex: bytesToHex(
+        deriveApplicationPseudonym(session.roundId, applicantSecret, nonce),
+      ),
+      applyNullifierHex: bytesToHex(deriveApplyNullifier(session.roundId, applicantSecret)),
+      enrollmentLeafHex: hasImportedEnrollment(privateState)
+        ? bytesToHex(
+            deriveApplicantLeaf(
+              privateState.applicantIncomeBand,
+              privateState.applicantGpaScaled,
+              privateState.applicantRegionCode,
+              applicantSecret,
+              privateState.applicantSalt,
+            ),
+          )
+        : null,
+      reviewerIdHex: bytesToHex(deriveReviewerId(privateState.reviewerSecret)),
+    };
+  } finally {
+    applicantSecret.fill(0);
+    nonce.fill(0);
+  }
 };
 
 export const registerReviewer = async (
@@ -174,96 +204,101 @@ export const registerReviewer = async (
   return result.public;
 };
 
-export type EnrollmentResult = {
-  readonly applicantIdHex: string;
-  readonly enrollmentLeafHex: string;
-};
-
 /**
- * Computes the enrollment leaf entirely in this browser, from attributes and
- * the applicant secret already held in private state — neither ever leaves
- * it. Only the resulting leaf is returned, for the institution to pass to
- * `registerApplicant`; there is no path that builds the same leaf from an
- * applicant ID instead, because `apply`'s own witness recomputes it the same
- * way to find its Merkle path.
- *
- * Reuses the `applicantSecret`/`applicantSalt` this browser already drew at
- * random when it joined, rather than generating new ones, so enrolling again
- * with corrected attributes does not orphan a leaf already registered under
- * the previous ones... unless the attributes actually changed, in which case
- * it produces a different leaf on purpose.
+ * The institution's side of enrollment. It verified the attributes out of
+ * band, draws a fresh salt, and registers the leaf built from the applicant's
+ * public ID. The returned receipt is how the applicant learns the exact values
+ * `apply` must reopen; it is private, held only in memory, and never stored.
  */
-export const enrollApplicant = async (
+export const registerApplicant = async (
   session: RoundSession,
+  applicantIdInput: string,
   incomeBandInput: string,
   gpaScaledInput: string,
   regionCodeInput: string,
-): Promise<EnrollmentResult> => {
-  const attributes: ApplicantAttributes = parseApplicantAttributes(
-    incomeBandInput,
-    gpaScaledInput,
-    regionCodeInput,
-  );
-  const current = await readPrivateState(session);
-  const applicantSecret = Uint8Array.from(current.applicantSecret);
-  const applicantSalt = Uint8Array.from(current.applicantSalt);
-  const nextPrivateState = createAequiraPrivateState({
-    ...current,
-    applicantSecret,
-    applicantSalt,
-    applicantIncomeBand: attributes.incomeBand,
-    applicantGpaScaled: attributes.gpaScaled,
-    applicantRegionCode: attributes.regionCode,
-  });
+): Promise<string> => {
+  const applicantId = hexToBytes(parseApplicantId(applicantIdInput));
+  const attributes = parseApplicantAttributes(incomeBandInput, gpaScaledInput, regionCodeInput);
+  const salt = crypto.getRandomValues(new Uint8Array(32));
 
-  await withDeploymentStage('private-state-update', () =>
-    setAequiraPrivateState(session.providers, session.address, nextPrivateState),
-  );
+  try {
+    const { enrollmentLeaf, receipt } = issueEnrollmentReceipt({
+      roundId: session.roundId,
+      applicantId,
+      ...attributes,
+      salt,
+    });
 
-  return {
-    applicantIdHex: bytesToHex(deriveApplicantId(applicantSecret)),
-    enrollmentLeafHex: bytesToHex(
-      deriveApplicantLeaf(
-        attributes.incomeBand,
-        attributes.gpaScaled,
-        attributes.regionCode,
-        applicantSecret,
-        applicantSalt,
-      ),
-    ),
-  };
-};
+    await withDeploymentStage('circuit-register-applicant', () =>
+      session.contract.callTx.registerApplicant(enrollmentLeaf),
+    );
 
-export const registerApplicant = async (
-  session: RoundSession,
-  enrollmentLeafHexInput: string,
-): Promise<FinalizedTxData> => {
-  const enrollmentLeaf = hexToBytes(parseEnrollmentLeaf(enrollmentLeafHexInput));
-
-  const result = await withDeploymentStage('circuit-register-applicant', () =>
-    session.contract.callTx.registerApplicant(enrollmentLeaf),
-  );
-
-  return result.public;
+    return receipt;
+  } finally {
+    salt.fill(0);
+  }
 };
 
 /**
- * Submits this browser's own application.
+ * The applicant's side: checks the receipt against this round and this
+ * browser's own applicant secret, then keeps its attributes and salt in
+ * encrypted private state for `apply`.
+ */
+export const importEnrollmentReceipt = async (
+  session: RoundSession,
+  receiptText: string,
+): Promise<void> => {
+  const current = await readPrivateState(session);
+  const applicantSecret = Uint8Array.from(current.applicantSecret);
+  let opened: ReturnType<typeof openEnrollmentReceipt>;
+
+  try {
+    opened = openEnrollmentReceipt(receiptText, { roundId: session.roundId, applicantSecret });
+  } catch (error) {
+    // Receipt errors are fixed, input-free messages, safe to show verbatim.
+    throw error instanceof EnrollmentReceiptError ? new InputError(error.message) : error;
+  }
+
+  await withDeploymentStage('private-state-update', () =>
+    setAequiraPrivateState(
+      session.providers,
+      session.address,
+      createAequiraPrivateState({
+        ...current,
+        applicantSecret,
+        applicantIncomeBand: opened.incomeBand,
+        applicantGpaScaled: opened.gpaScaled,
+        applicantRegionCode: opened.regionCode,
+        applicantSalt: opened.salt,
+      }),
+    ),
+  );
+};
+
+/**
+ * Submits this browser's own application and returns its public pseudonym.
  *
  * The commitment randomness is derived from `(roundId, applicantSecret)`
  * rather than drawn at random, matching the CLI's `deriveApplicationNonce` —
  * see that function in `@aequira/sdk` for why.
  */
-export const applyToRound = async (session: RoundSession): Promise<FinalizedTxData> => {
+export const applyToRound = async (session: RoundSession): Promise<string> => {
   const current = await readPrivateState(session);
+
+  if (!hasImportedEnrollment(current)) {
+    throw new InputError('Import the enrollment receipt from the institution first.');
+  }
+
   const applicantSecret = Uint8Array.from(current.applicantSecret);
   const nonce = await deriveApplicationNonce(session.roundId, applicantSecret);
 
-  const result = await withDeploymentStage('circuit-apply', () =>
-    session.contract.callTx.apply(nonce),
-  );
-
-  return result.public;
+  try {
+    await withDeploymentStage('circuit-apply', () => session.contract.callTx.apply(nonce));
+    return bytesToHex(deriveApplicationPseudonym(session.roundId, applicantSecret, nonce));
+  } finally {
+    applicantSecret.fill(0);
+    nonce.fill(0);
+  }
 };
 
 export type PhaseTransition = 'openApplications' | 'openReveal' | 'openReview';
@@ -279,6 +314,8 @@ export const advancePhase = async (
   return result.public;
 };
 
+type Opening = Omit<LastScore, 'stage'>;
+
 /**
  * Rebuilds the opening for a score without touching the network.
  *
@@ -289,7 +326,7 @@ export const advancePhase = async (
 const buildOpening = async (
   session: RoundSession,
   input: ScoreInput,
-): Promise<{ readonly opening: ScoreOpening; readonly privateState: AequiraPrivateState }> => {
+): Promise<{ readonly opening: Opening; readonly privateState: AequiraPrivateState }> => {
   const applicationIdHex = parseApplicationId(input.applicationIdHex);
   const applicationId = hexToBytes(applicationIdHex);
   const current = await readPrivateState(session);
@@ -311,6 +348,7 @@ const buildOpening = async (
       nullifierHex: bytesToHex(
         deriveScoreNullifier(session.roundId, applicationId, reviewerSecret),
       ),
+      score: input.score,
     },
     privateState: createAequiraPrivateState({
       ...current,
@@ -321,72 +359,80 @@ const buildOpening = async (
   };
 };
 
-/**
- * Writes the score and its derived salt into encrypted private state, so the
- * witnesses read them during proving, then submits the call.
- */
-export const commitScore = async (
-  session: RoundSession,
-  input: ScoreInput,
-): Promise<CommitScoreResult> => {
-  const { opening, privateState } = await buildOpening(session, input);
-
-  await withDeploymentStage('private-state-update', () =>
-    setAequiraPrivateState(session.providers, session.address, privateState),
-  );
-
-  const result = await withDeploymentStage('circuit-commit-score', () =>
-    session.contract.callTx.commitScore(hexToBytes(opening.applicationIdHex)),
-  );
-
-  return { opening, tx: result.public };
-};
-
-/**
- * Checks an opening against the on-chain commitment set locally.
- *
- * A mismatched score would fail the contract's own assertion, wasting a proof
- * and a fee. It also demonstrates the reverse of the privacy claim: this browser
- * can verify the opening without publishing the score.
- */
-export const hasMatchingCommitment = async (
-  session: RoundSession,
-  input: ScoreInput,
-): Promise<boolean> => {
-  const { opening } = await buildOpening(session, input);
+const readLedger = async (session: RoundSession) => {
   const ledger = await withDeploymentStage('ledger-query', () =>
     queryAequiraLedger(session.providers, session.address),
   );
 
-  return ledger === null
-    ? false
-    : ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex));
+  if (ledger === null) {
+    throw new InputError('The public ledger is not available yet. Try again in a moment.');
+  }
+
+  return ledger;
 };
 
-export const revealScore = async (
-  session: RoundSession,
-  input: ScoreInput,
-): Promise<FinalizedTxData> => {
+/**
+ * Writes the score and its derived salt into encrypted private state, so the
+ * witnesses read them during proving, then submits the call.
+ *
+ * Refused up front for an ID that is not a submitted application, or one this
+ * reviewer already scored: the nullifier would make either mistake permanent,
+ * and a commitment to anything but a real application can never be revealed.
+ */
+export const commitScore = async (session: RoundSession, input: ScoreInput): Promise<Opening> => {
   const { opening, privateState } = await buildOpening(session, input);
+  const ledger = await readLedger(session);
+
+  if (!ledger.applications.member(hexToBytes(opening.applicationIdHex))) {
+    throw new InputError('That application ID is not a submitted application in this round.');
+  }
+  if (ledger.scoreNullifiers.member(hexToBytes(opening.nullifierHex))) {
+    throw new InputError('You already committed a score for that application.');
+  }
 
   await withDeploymentStage('private-state-update', () =>
     setAequiraPrivateState(session.providers, session.address, privateState),
   );
+  await withDeploymentStage('circuit-commit-score', () =>
+    session.contract.callTx.commitScore(hexToBytes(opening.applicationIdHex)),
+  );
 
-  const result = await withDeploymentStage('circuit-reveal-score', () =>
+  return opening;
+};
+
+/**
+ * Opens a sealed score. Checked against the on-chain commitment set locally
+ * first: a mismatched score would fail the contract's own assertion, wasting a
+ * proof and a fee. It also demonstrates the reverse of the privacy claim — this
+ * browser can verify the opening without publishing the score.
+ */
+export const revealScore = async (session: RoundSession, input: ScoreInput): Promise<Opening> => {
+  const { opening, privateState } = await buildOpening(session, input);
+  const ledger = await readLedger(session);
+
+  if (!ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex))) {
+    throw new InputError(
+      'That score does not open the commitment recorded on chain for this application.',
+    );
+  }
+
+  await withDeploymentStage('private-state-update', () =>
+    setAequiraPrivateState(session.providers, session.address, privateState),
+  );
+  await withDeploymentStage('circuit-reveal-score', () =>
     session.contract.callTx.revealScore(hexToBytes(opening.applicationIdHex)),
   );
 
-  return result.public;
+  return opening;
 };
 
 export const readRoundState = async (
   session: RoundSession,
-  knownApplicationIdHexes: readonly string[],
+  identity: LocalIdentity | null,
 ): Promise<RoundView | null> => {
   const ledger = await withDeploymentStage('ledger-query', () =>
     queryAequiraLedger(session.providers, session.address),
   );
 
-  return ledger === null ? null : toRoundView(ledger, knownApplicationIdHexes);
+  return ledger === null ? null : toRoundView(ledger, identity);
 };

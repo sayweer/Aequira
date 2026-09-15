@@ -21,11 +21,50 @@ export type RoundDisclosure = {
   readonly public: readonly DisclosureRow[];
 };
 
+/** The score this tab last committed or revealed. The score itself never leaves the tab. */
+export type LastScore = {
+  readonly applicationIdHex: string;
+  readonly commitmentHex: string;
+  readonly nullifierHex: string;
+  readonly score: number;
+  readonly stage: 'committed' | 'revealed';
+};
+
+/**
+ * Where the last score stands: nothing yet, committed but not yet indexed,
+ * sealed in the on-chain commitment set, or opened during reveal (which removes
+ * the commitment, so absence from the set no longer means "pending").
+ */
+export type ScoreStage = 'none' | 'opened' | 'pending' | 'sealed';
+
+export const scoreStage = (
+  lastScore: LastScore | null,
+  commitmentHexes: readonly string[],
+): ScoreStage => {
+  if (lastScore === null) {
+    return 'none';
+  }
+  if (lastScore.stage === 'revealed') {
+    return 'opened';
+  }
+  return commitmentHexes.includes(lastScore.commitmentHex) ? 'sealed' : 'pending';
+};
+
+const COMMITMENT_DETAIL: Record<ScoreStage, string> = {
+  none: 'Computed in this browser. It appears on chain once the commit transaction is finalized.',
+  opened:
+    'Opened during reveal and removed from the commitment set. The score now counts in the public tally.',
+  pending:
+    'Computed in this browser. It appears on chain once the commit transaction is finalized.',
+  sealed:
+    'Computed in this browser and now present in the on-chain commitment set. It binds the score without revealing it.',
+};
+
 export type RoundDisclosureInput = {
   readonly applicationIdHex: string | null;
   readonly commitmentHex: string | null;
-  readonly commitmentOnChain: boolean;
   readonly nullifierHex: string | null;
+  readonly scoreStage: ScoreStage;
   readonly phaseLabel: string;
   readonly revealedCount: number | null;
   readonly roundIdHex: string;
@@ -43,7 +82,9 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
   local: [
     {
       detail:
-        'Entered in this tab. It is written to encrypted browser storage and read by the circuit as a witness. It is not in the transaction.',
+        input.scoreStage === 'opened'
+          ? 'Revealed on purpose during the reveal phase. It now counts in the public tally.'
+          : 'Entered in this tab. It is written to encrypted browser storage and read by the circuit as a witness. It is not in the transaction.',
       label: 'Score',
       scope: 'local',
       value: input.score === null ? 'nothing entered yet' : String(input.score),
@@ -74,6 +115,20 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
       scope: 'local',
       value: 'held in this browser',
     },
+    {
+      detail:
+        'Income band, grade average and region, as the institution verified them and wrote them into the enrollment receipt. Applying proves they meet the rules without publishing them.',
+      label: 'Applicant attributes',
+      scope: 'local',
+      value: 'held in this browser',
+    },
+    {
+      detail:
+        'Behind the applicant ID. It keeps the application pseudonym unlinkable to the enrollment, even for the institution that enrolled it.',
+      label: 'Applicant secret',
+      scope: 'local',
+      value: 'held in this browser',
+    },
   ],
   public: [
     {
@@ -95,9 +150,7 @@ export const buildRoundDisclosure = (input: RoundDisclosureInput): RoundDisclosu
       value: input.applicationIdHex ?? NOT_YET,
     },
     {
-      detail: input.commitmentOnChain
-        ? 'Computed in this browser and now present in the on-chain commitment set. It binds the score without revealing it.'
-        : 'Computed in this browser. It appears on chain once the commit transaction is finalized.',
+      detail: COMMITMENT_DETAIL[input.scoreStage],
       label: 'Score commitment',
       scope: 'public',
       value: input.commitmentHex ?? NOT_YET,

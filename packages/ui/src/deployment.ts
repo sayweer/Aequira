@@ -15,7 +15,11 @@ const PRIVATE_VALUE_LENGTH = 32;
 const randomPrivateValue = (): Uint8Array =>
   crypto.getRandomValues(new Uint8Array(PRIVATE_VALUE_LENGTH));
 
-/** Fresh secrets for a browser that holds nothing for a round yet. */
+/**
+ * Fresh secrets for a browser that holds nothing for a round yet. The applicant
+ * attributes and salt stay zero until the institution's enrollment receipt is
+ * imported; an all-zero salt is how the SDK tells no receipt has arrived.
+ */
 export const createRandomPrivateState = (): AequiraPrivateState =>
   createAequiraPrivateState({
     adminSecret: randomPrivateValue(),
@@ -26,7 +30,7 @@ export const createRandomPrivateState = (): AequiraPrivateState =>
     applicantIncomeBand: 0n,
     applicantGpaScaled: 0n,
     applicantRegionCode: 0n,
-    applicantSalt: randomPrivateValue(),
+    applicantSalt: new Uint8Array(PRIVATE_VALUE_LENGTH),
   });
 
 export type BrowserAequiraDeployment = {

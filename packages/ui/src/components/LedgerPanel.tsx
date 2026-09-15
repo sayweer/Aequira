@@ -36,6 +36,14 @@ export const LedgerPanel = ({ round }: LedgerPanelProps) => {
               <dd>{view.reviewerIdHexes.length}</dd>
             </div>
             <div>
+              <dt>Enrollment leaves</dt>
+              <dd>{view.enrollmentLeafCount}</dd>
+            </div>
+            <div>
+              <dt>Applications</dt>
+              <dd>{view.tallies.length}</dd>
+            </div>
+            <div>
               <dt>Sealed commitments</dt>
               <dd>{view.commitmentHexes.length}</dd>
             </div>

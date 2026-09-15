@@ -15,7 +15,7 @@ const App = () => {
 
   const isConnected = wallet.isConnected;
   const isOpen = round.address !== null;
-  const hasCommitted = round.lastOpening !== null;
+  const hasCommitted = round.lastScore !== null;
 
   return (
     <div className="app-shell">
