@@ -5,9 +5,11 @@ type StageMessageProps = {
 };
 
 export const StageMessage = ({ onDismiss, text, title }: StageMessageProps) => (
-  <div className="error-message" role="alert">
-    <strong>{title}</strong>
-    <p>{text}</p>
+  <div className="message" role="alert">
+    <div>
+      <strong>{title}</strong>
+      <p>{text}</p>
+    </div>
     {onDismiss !== undefined && (
       <button className="text-button" type="button" onClick={onDismiss}>
         Dismiss

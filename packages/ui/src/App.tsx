@@ -4,135 +4,129 @@ import { ContractPanel } from './components/ContractPanel.js';
 import { LedgerPanel } from './components/LedgerPanel.js';
 import { PrivacyProofPanel } from './components/PrivacyProofPanel.js';
 import { ReviewPanel } from './components/ReviewPanel.js';
+import { RoundHeader } from './components/RoundHeader.js';
 import { WalletPanel } from './components/WalletPanel.js';
 import { useAequiraRound } from './hooks/useAequiraRound.js';
 import { useWalletConnection } from './hooks/useWalletConnection.js';
-import { AEQUIRA_NETWORK_ID } from './wallet.js';
+import { focusRole, type RoundRole } from './round-actions.js';
+
+const STEPS = [
+  {
+    title: 'Enroll',
+    text: 'The institution verifies each applicant and hands them a private receipt. Only a commitment goes on chain.',
+  },
+  {
+    title: 'Seal',
+    text: 'Applicants prove they meet the rules; reviewers commit salted scores. The figures stay in their browsers.',
+  },
+  {
+    title: 'Reveal',
+    text: 'Reviewers open their scores into a tally anyone can recompute from the public ledger.',
+  },
+];
+
+const ROLE_ORDER: readonly RoundRole[] = ['organizer', 'applicant', 'reviewer'];
 
 const App = () => {
   const wallet = useWalletConnection();
   const round = useAequiraRound(wallet.connectedWallet?.api ?? null);
-
-  const isConnected = wallet.isConnected;
   const isOpen = round.address !== null;
-  const hasCommitted = round.lastScore !== null;
+
+  const focus = focusRole(round.view?.phase ?? null);
+  // The panel the phase is waiting on comes first, and the grid gives it room.
+  const roles = [focus, ...ROLE_ORDER.filter((role) => role !== focus)];
+  const renderRole = (role: RoundRole) =>
+    role === 'organizer' ? (
+      <AdminPanel focus={role === focus} key={role} round={round} />
+    ) : role === 'applicant' ? (
+      <ApplicantPanel focus={role === focus} key={role} round={round} />
+    ) : (
+      <ReviewPanel focus={role === focus} key={role} round={round} />
+    );
 
   return (
     <div className="app-shell">
       <header className="site-header">
-        <a className="brand-lockup" href="/" aria-label="AEQUIRA home">
-          <span className="brand-mark" aria-hidden="true">
-            A
-          </span>
-          <span>AEQUIRA</span>
+        <a className="brand" href="/" aria-label="AEQUIRA home">
+          <span className="brand-mark" aria-hidden="true" />
+          AEQUIRA
         </a>
-        <div className="network-chip" aria-label="Network: Midnight Preprod">
-          <span className="network-dot" aria-hidden="true" />
-          Midnight {AEQUIRA_NETWORK_ID}
-        </div>
+        <span className="chip" data-tone="neutral">
+          Midnight Preprod
+        </span>
       </header>
 
       <main>
-        <section className="hero" aria-labelledby="hero-title">
-          <div className="hero-copy">
-            <p className="eyebrow">Private review · Public proof</p>
-            <h1 id="hero-title">A score can be verified before it is seen.</h1>
-            <p className="hero-intro">
-              Reviewers commit decisions without publishing the score. AEQUIRA keeps the evidence
-              verifiable and the sensitive input local until reveal.
-            </p>
-
-            <ol className="flow-rail" aria-label="Demo progress">
-              <li className={isConnected ? 'flow-step is-complete' : 'flow-step is-current'}>
-                <span className="step-index">01</span>
-                <span>
-                  <strong>Connect Lace</strong>
-                  <small>
-                    {isConnected ? 'Preprod session ready' : 'Authorize this browser session'}
-                  </small>
-                </span>
-              </li>
-              <li
-                className={
-                  isOpen
-                    ? 'flow-step is-complete'
-                    : isConnected
-                      ? 'flow-step is-current'
-                      : 'flow-step'
-                }
-              >
-                <span className="step-index">02</span>
-                <span>
-                  <strong>Resolve contract</strong>
-                  <small>
-                    {isOpen
-                      ? 'Preprod address confirmed'
-                      : isConnected
-                        ? 'Deploy or join a round'
-                        : 'Connect Lace first'}
-                  </small>
-                </span>
-              </li>
-              <li
-                className={
-                  hasCommitted
-                    ? 'flow-step is-complete'
-                    : isOpen
-                      ? 'flow-step is-current'
-                      : 'flow-step'
-                }
-              >
-                <span className="step-index">03</span>
-                <span>
-                  <strong>Commit private score</strong>
-                  <small>
-                    {hasCommitted
-                      ? 'Commitment public, score local'
-                      : 'Only the salted commitment becomes public'}
-                  </small>
-                </span>
-              </li>
-            </ol>
-          </div>
-
-          <WalletPanel busy={round.busy !== null} wallet={wallet}>
-            <ContractPanel round={round} />
-          </WalletPanel>
-        </section>
-
-        {isOpen && (
-          <section className="round-grid" aria-label="Round actions">
-            <AdminPanel round={round} />
-            <ApplicantPanel round={round} />
-            <ReviewPanel round={round} />
-            <LedgerPanel round={round} />
-          </section>
-        )}
-
         {isOpen ? (
-          <PrivacyProofPanel round={round} />
+          <>
+            <RoundHeader round={round} wallet={wallet} />
+            <div className="role-grid">{roles.map(renderRole)}</div>
+            <LedgerPanel round={round} />
+            <PrivacyProofPanel round={round} />
+          </>
         ) : (
-          <section className="privacy-boundary" aria-labelledby="boundary-heading">
-            <div className="boundary-intro">
-              <p className="eyebrow">Privacy boundary</p>
-              <h2 id="boundary-heading">The proof travels. The score does not.</h2>
-            </div>
-            <div className="boundary-list">
-              <div>
-                <span className="boundary-label">Public</span>
-                <p>Contract address, transaction result, score commitment, replay nullifier.</p>
+          <>
+            <section className="intro" aria-labelledby="intro-heading">
+              <div className="intro-copy">
+                <h1 id="intro-heading">A score can be verified before it is seen.</h1>
+                <p className="intro-lede">
+                  AEQUIRA runs private scholarship and grant rounds on Midnight. Eligibility is
+                  proven, scores are sealed, and the outcome is public — without publishing anyone’s
+                  figures.
+                </p>
               </div>
-              <div>
-                <span className="boundary-label">Local</span>
-                <p>Reviewer secret, score value, score salt, and unrevealed private state.</p>
-              </div>
+              <ol className="steps">
+                {STEPS.map((step, index) => (
+                  <li key={step.title}>
+                    <span className="step-number" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <div>
+                      <h2>{step.title}</h2>
+                      <p>{step.text}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+
+            <div className="session-grid">
+              <WalletPanel busy={round.busy !== null} wallet={wallet} />
+              <ContractPanel enabled={wallet.isConnected} round={round} />
             </div>
-          </section>
+
+            <section className="boundary is-preview" aria-labelledby="boundary-preview-heading">
+              <div className="boundary-intro">
+                <h2 id="boundary-preview-heading">The proof travels. The score does not.</h2>
+              </div>
+              <div className="boundary-grid">
+                <div className="boundary-side" data-scope="public">
+                  <h3>
+                    Public <span>on the ledger</span>
+                  </h3>
+                  <p>
+                    Eligibility rules, reviewer roster, enrollment commitments, application
+                    pseudonyms, sealed score commitments and replay nullifiers.
+                  </p>
+                </div>
+                <div className="boundary-side" data-scope="local">
+                  <h3>
+                    <span className="seal-glyph" aria-hidden="true" />
+                    Local <span>in each browser</span>
+                  </h3>
+                  <p>
+                    Applicant figures and secrets, reviewer secrets, scores and their salts — until
+                    a reviewer chooses to reveal.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </>
         )}
       </main>
 
       <footer className="site-footer">
-        <p>AEQUIRA · Anonymous Eligibility, Qualified Impartial Rubric Attestation</p>
+        <p>AEQUIRA — Anonymous Eligibility, Qualified Impartial Rubric Attestation</p>
         <p>Preprod prototype</p>
       </footer>
     </div>

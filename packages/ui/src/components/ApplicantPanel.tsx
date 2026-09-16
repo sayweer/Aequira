@@ -2,14 +2,16 @@ import { useState } from 'react';
 
 import type { AequiraRound } from '../hooks/useAequiraRound.js';
 import { actionAvailability } from '../round-actions.js';
-import { CopyButton } from './CopyButton.js';
+import { ActionButton } from './ActionButton.js';
+import { HexValue } from './HexValue.js';
 import { StageMessage } from './StageMessage.js';
 
 type ApplicantPanelProps = {
+  readonly focus: boolean;
   readonly round: AequiraRound;
 };
 
-export const ApplicantPanel = ({ round }: ApplicantPanelProps) => {
+export const ApplicantPanel = ({ focus, round }: ApplicantPanelProps) => {
   const [receiptInput, setReceiptInput] = useState('');
 
   const phase = round.view?.phase ?? null;
@@ -20,98 +22,107 @@ export const ApplicantPanel = ({ round }: ApplicantPanelProps) => {
   const applicantId = round.identity?.applicantIdHex ?? null;
   const errorText = round.errorFor(['importReceipt', 'apply']);
 
+  const checklist = [
+    { done: local?.receiptImported === true, label: 'Receipt imported' },
+    { done: local?.enrolledOnChain === true, label: 'Enrollment on chain' },
+    { done: local?.hasApplied === true, label: 'Application submitted' },
+  ];
+
   return (
-    <section className="round-card" aria-labelledby="applicant-heading">
-      <div className="panel-heading">
+    <section className="panel role-panel" data-focus={focus} aria-labelledby="applicant-heading">
+      <header className="panel-header">
         <div>
-          <p className="panel-kicker">Applicant</p>
-          <h3 id="applicant-heading">Enroll and apply</h3>
+          <p className="panel-label">Applicant</p>
+          <h2 className="panel-title" id="applicant-heading">
+            Enroll and apply
+          </h2>
         </div>
-      </div>
+      </header>
+
+      <ul className="checklist" aria-label="Your progress">
+        {checklist.map((item) => (
+          <li data-done={item.done} key={item.label}>
+            <span className="check-mark" aria-hidden="true" />
+            {item.label}
+            <span className="visually-hidden">{item.done ? ': done' : ': not yet'}</span>
+          </li>
+        ))}
+      </ul>
 
       {applicantId !== null && (
-        <div className="field">
-          <span>Your applicant ID — give this to the institution</span>
-          <code className="disclosure-value">{applicantId}</code>
-          <CopyButton label="applicant ID" value={applicantId} />
+        <div className="subsection">
+          <h3 className="subsection-title">Your applicant ID</h3>
+          <p className="field-hint">
+            Give it to the institution. It is a one-way hash: they cannot link it to the application
+            you submit later.
+          </p>
+          <HexValue label="applicant ID" value={applicantId} />
         </div>
       )}
 
-      <label className="field">
-        <span>Enrollment receipt from the institution</span>
-        <textarea
-          autoComplete="off"
-          disabled={!importReceipt.enabled}
-          onChange={(event) => setReceiptInput(event.target.value)}
-          placeholder="aequira-enrollment:v1:…"
-          rows={3}
-          spellCheck={false}
-          value={receiptInput}
-        />
-      </label>
-      <p className="privacy-note">
-        The receipt holds the attributes the institution verified. It stays in encrypted storage in
-        this browser; applying proves they meet the rules without publishing them.
-      </p>
-      <button
-        aria-busy={round.busy === 'importReceipt'}
-        className="button button-secondary"
-        disabled={!importReceipt.enabled || receiptInput.trim().length === 0}
-        onClick={() =>
-          void round.importReceipt(receiptInput).then((imported) => {
-            // Kept after a failure so it can be corrected, cleared once stored.
-            if (imported) {
-              setReceiptInput('');
-            }
-          })
-        }
-        type="button"
-      >
-        {round.busy === 'importReceipt' ? 'Checking receipt…' : 'Import receipt'}
-      </button>
-      {importReceipt.reason !== null && <p className="privacy-note">{importReceipt.reason}</p>}
+      <div className="subsection">
+        <h3 className="subsection-title">Import your enrollment receipt</h3>
+        <label className="field">
+          <span className="field-label">Receipt from the institution</span>
+          <textarea
+            autoComplete="off"
+            className="mono"
+            disabled={!importReceipt.enabled}
+            onChange={(event) => setReceiptInput(event.target.value)}
+            placeholder="aequira-enrollment:v1:…"
+            rows={3}
+            spellCheck={false}
+            value={receiptInput}
+          />
+          <span className="field-hint">
+            Checked against your own secret, then kept only in this browser’s encrypted storage.
+          </span>
+        </label>
+        <ActionButton
+          availability={importReceipt}
+          busy={round.busy === 'importReceipt'}
+          busyLabel="Checking receipt…"
+          disabled={receiptInput.trim().length === 0}
+          onClick={() =>
+            void round.importReceipt(receiptInput).then((imported) => {
+              // Kept after a failure so it can be corrected, cleared once stored.
+              if (imported) {
+                setReceiptInput('');
+              }
+            })
+          }
+        >
+          Import receipt
+        </ActionButton>
+      </div>
 
-      {local !== null && (
-        <dl className="ledger-grid">
-          <div>
-            <dt>Receipt</dt>
-            <dd>{local.receiptImported ? 'Imported' : 'Not yet'}</dd>
+      <div className="subsection">
+        <h3 className="subsection-title">Apply</h3>
+        <p className="field-hint">
+          A proof shows your figures meet the round’s rules. The figures themselves stay here.
+        </p>
+        <ActionButton
+          availability={apply}
+          busy={round.busy === 'apply'}
+          busyLabel="Proving and awaiting Lace…"
+          onClick={() => void round.apply()}
+          variant="primary"
+        >
+          Submit application
+        </ActionButton>
+        {local?.applicationIdHex != null && (
+          <div className="field">
+            <span className="field-label">Your application ID</span>
+            <HexValue label="application ID" value={local.applicationIdHex} />
           </div>
-          <div>
-            <dt>Enrollment</dt>
-            <dd>{local.enrolledOnChain ? 'On chain' : 'Not on chain'}</dd>
-          </div>
-          <div>
-            <dt>Application</dt>
-            <dd>{local.hasApplied ? 'Submitted' : 'Not yet'}</dd>
-          </div>
-        </dl>
-      )}
-
-      <button
-        aria-busy={round.busy === 'apply'}
-        className="button button-primary"
-        disabled={!apply.enabled}
-        onClick={() => void round.apply()}
-        type="button"
-      >
-        {round.busy === 'apply' ? 'Proving and awaiting Lace…' : 'Submit application'}
-      </button>
-      {apply.reason !== null && <p className="privacy-note">{apply.reason}</p>}
-
-      {local?.applicationIdHex != null && (
-        <div className="field">
-          <span>Your application ID — reviewers score this pseudonym</span>
-          <code className="disclosure-value">{local.applicationIdHex}</code>
-          <CopyButton label="application ID" value={local.applicationIdHex} />
-        </div>
-      )}
+        )}
+      </div>
 
       {errorText !== null && (
         <StageMessage
           onDismiss={round.dismissError}
           text={errorText}
-          title="This needs attention"
+          title="That did not go through"
         />
       )}
     </section>

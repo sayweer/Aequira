@@ -1,88 +1,79 @@
-import type { ReactNode } from 'react';
-
 import type { WalletConnection } from '../hooks/useWalletConnection.js';
 import { LACE_INSTALL_URL, shortenAddress } from '../wallet.js';
 import { StageMessage } from './StageMessage.js';
 
-const statusLabel = (viewState: WalletConnection['viewState']): string => {
-  switch (viewState) {
-    case 'connected':
-      return 'Connected';
-    case 'connecting':
-      return 'Connecting';
-    case 'detecting':
-      return 'Detecting';
-    default:
-      return 'Not connected';
-  }
+const STATUS: Record<
+  WalletConnection['viewState'],
+  { readonly label: string; readonly tone: string }
+> = {
+  connected: { label: 'Connected', tone: 'success' },
+  connecting: { label: 'Waiting for Lace', tone: 'pending' },
+  detecting: { label: 'Looking for Lace', tone: 'pending' },
+  error: { label: 'Not connected', tone: 'danger' },
+  'no-wallet': { label: 'Lace not found', tone: 'danger' },
+  ready: { label: 'Not connected', tone: 'neutral' },
 };
 
 type WalletPanelProps = {
   readonly busy: boolean;
-  readonly children?: ReactNode;
   readonly wallet: WalletConnection;
 };
 
-export const WalletPanel = ({ busy, children, wallet }: WalletPanelProps) => {
+export const WalletPanel = ({ busy, wallet }: WalletPanelProps) => {
   const { connectedWallet, errorMessage, isConnected, selectedWallet, viewState, wallets } = wallet;
+  const status = STATUS[viewState];
 
   return (
-    <section className="wallet-panel" aria-labelledby="wallet-heading">
-      <div className="panel-heading">
+    <section className="panel" aria-labelledby="wallet-heading">
+      <header className="panel-header">
         <div>
-          <p className="panel-kicker">Wallet session</p>
-          <h2 id="wallet-heading">Lace on Preprod</h2>
+          <p className="panel-label">Step 1</p>
+          <h2 className="panel-title" id="wallet-heading">
+            Connect your wallet
+          </h2>
         </div>
-        <span
-          className={`status-badge status-${viewState}`}
-          aria-live="polite"
-          aria-label={`Wallet status: ${viewState}`}
-        >
-          {statusLabel(viewState)}
+        <span className="chip" data-tone={status.tone} aria-live="polite">
+          {status.label}
         </span>
-      </div>
+      </header>
 
       {viewState === 'detecting' && (
-        <div className="wallet-skeleton" aria-busy="true" aria-label="Detecting Lace">
+        <div className="skeleton" aria-busy="true" aria-label="Looking for Lace">
           <span />
           <span />
-          <span />
-          <p>Looking for a Midnight wallet in this browser…</p>
         </div>
       )}
 
       {viewState === 'no-wallet' && (
-        <div className="panel-state">
-          <p className="state-title">Lace was not detected</p>
-          <p>
-            Install or enable Lace in Chrome, then refresh detection. The extension must be unlocked
-            before connecting.
+        <>
+          <p className="panel-text">
+            Install or enable Lace in Chrome and unlock it, then look again.
           </p>
           <div className="button-row">
             <a
               className="button button-primary"
               href={LACE_INSTALL_URL}
-              target="_blank"
               rel="noreferrer"
+              target="_blank"
             >
               Install Lace
             </a>
             <button
               className="button button-secondary"
-              type="button"
               onClick={wallet.retryDetection}
+              type="button"
             >
-              Detect again
+              Look again
             </button>
           </div>
-        </div>
+        </>
       )}
 
       {(viewState === 'ready' || viewState === 'connecting' || viewState === 'error') && (
-        <div className="panel-state">
+        <>
           {wallets.length > 1 ? (
             <fieldset className="wallet-options">
-              <legend>Choose a wallet</legend>
+              <legend className="field-label">Choose a wallet</legend>
               {wallets.map((injected) => (
                 <label className="wallet-option" key={injected.id}>
                   <input
@@ -101,22 +92,17 @@ export const WalletPanel = ({ busy, children, wallet }: WalletPanelProps) => {
               ))}
             </fieldset>
           ) : (
-            <div className="detected-wallet">
-              <span className="wallet-monogram" aria-hidden="true">
-                L
-              </span>
-              <span>
-                <strong>{selectedWallet?.api.name ?? 'Midnight wallet'}</strong>
-                <small>Detected in this browser</small>
-              </span>
-            </div>
+            <p className="panel-text">
+              {selectedWallet?.api.name ?? 'A Midnight wallet'} is installed in this browser.
+              AEQUIRA asks only for what a Preprod session needs.
+            </p>
           )}
 
           {errorMessage !== null && (
             <StageMessage
               onDismiss={wallet.retryConnection}
               text={errorMessage}
-              title="Connection needs attention"
+              title="Lace did not connect"
             />
           )}
 
@@ -124,54 +110,42 @@ export const WalletPanel = ({ busy, children, wallet }: WalletPanelProps) => {
             aria-busy={viewState === 'connecting'}
             className="button button-primary button-full"
             disabled={selectedWallet === null || viewState === 'connecting'}
-            type="button"
             onClick={() => void wallet.connect()}
+            type="button"
           >
-            {viewState === 'connecting' ? 'Approve in Lace…' : 'Connect Lace'}
+            {viewState === 'connecting' && <span className="spinner" aria-hidden="true" />}
+            <span>{viewState === 'connecting' ? 'Approve in Lace…' : 'Connect Lace'}</span>
           </button>
-          <p className="privacy-note">
-            AEQUIRA requests only the wallet capabilities needed for this Preprod session.
-          </p>
-        </div>
+        </>
       )}
 
       {isConnected && connectedWallet !== null && (
-        <div className="connected-state">
-          <div className="connected-wallet-row">
-            <span className="wallet-monogram is-connected" aria-hidden="true">
-              ✓
-            </span>
-            <span>
-              <strong>{connectedWallet.name}</strong>
-              <small>Authorized for Midnight Preprod</small>
-            </span>
-          </div>
-
-          <dl className="address-block">
+        <>
+          <dl className="key-values">
             <div>
-              <dt>Public unshielded address</dt>
-              <dd title={connectedWallet.address}>{shortenAddress(connectedWallet.address)}</dd>
+              <dt>Wallet</dt>
+              <dd>{connectedWallet.name}</dd>
+            </div>
+            <div>
+              <dt>Address</dt>
+              <dd className="mono" title={connectedWallet.address}>
+                {shortenAddress(connectedWallet.address)}
+              </dd>
             </div>
             <div>
               <dt>Network</dt>
               <dd>Preprod</dd>
             </div>
           </dl>
-
-          {children}
-
           <button
-            className="button button-secondary button-full"
+            className="button button-ghost"
             disabled={busy}
-            type="button"
             onClick={wallet.disconnect}
+            type="button"
           >
             Disconnect
           </button>
-          <p className="privacy-note">
-            Disconnecting clears this page session. Wallet permissions remain managed in Lace.
-          </p>
-        </div>
+        </>
       )}
     </section>
   );

@@ -1,19 +1,40 @@
 import type { AequiraRound } from '../hooks/useAequiraRound.js';
-import { buildRoundDisclosure, scoreStage, serializePublicLedger } from '../privacy-view.js';
+import {
+  buildRoundDisclosure,
+  scoreStage,
+  serializePublicLedger,
+  type DisclosureRow,
+} from '../privacy-view.js';
 
 type PrivacyProofPanelProps = {
   readonly round: AequiraRound;
 };
 
 const LEDE = {
-  none: null,
+  none: 'Commit a score to see exactly which half of it becomes public.',
   opened:
-    'The score below was opened on purpose during reveal and now counts in the public tally. Until then, only its commitment was public.',
+    'This score was opened on purpose during reveal and now counts in the public tally. Until then, only its commitment was public.',
   pending:
     'The commitment below was computed in this browser. Waiting for the indexer to show it on chain.',
   sealed:
-    'The commitment below was computed in this browser and is now in the on-chain set. The score that produced it is not.',
+    'The commitment below was computed in this browser and is now on chain. The score that produced it is not.',
 } as const;
+
+const HEX_64 = /^[0-9a-f]{64}$/;
+
+const Rows = ({ rows }: { readonly rows: readonly DisclosureRow[] }) => (
+  <dl className="boundary-rows">
+    {rows.map((row) => (
+      <div key={row.label}>
+        <dt>{row.label}</dt>
+        <dd className={HEX_64.test(row.value) ? 'mono is-hex' : undefined} title={row.value}>
+          {row.value}
+        </dd>
+        <p>{row.detail}</p>
+      </div>
+    ))}
+  </dl>
+);
 
 export const PrivacyProofPanel = ({ round }: PrivacyProofPanelProps) => {
   const { lastScore, view } = round;
@@ -41,53 +62,35 @@ export const PrivacyProofPanel = ({ round }: PrivacyProofPanelProps) => {
   });
 
   return (
-    <section className="disclosure-panel" aria-labelledby="disclosure-heading">
+    <section className="boundary" aria-labelledby="boundary-heading">
       <div className="boundary-intro">
-        <p className="eyebrow">Privacy boundary</p>
-        <h2 id="disclosure-heading">The proof travels. The score does not.</h2>
-        {LEDE[stage] !== null && <p className="disclosure-lede">{LEDE[stage]}</p>}
+        <h2 id="boundary-heading">The proof travels. The score does not.</h2>
+        <p>{LEDE[stage]}</p>
       </div>
 
-      <div className="disclosure-columns">
-        <div className="disclosure-column">
+      <div className="boundary-grid">
+        <div className="boundary-side" data-scope="public">
           <h3>
-            <span className="boundary-label">Public</span> What an observer reads
+            Public <span>what an observer reads</span>
           </h3>
-          <dl>
-            {disclosure.public.map((row) => (
-              <div key={row.label}>
-                <dt>{row.label}</dt>
-                <dd className="disclosure-value" title={row.value}>
-                  {row.value}
-                </dd>
-                <p>{row.detail}</p>
-              </div>
-            ))}
-          </dl>
+          <Rows rows={disclosure.public} />
         </div>
 
-        <div className="disclosure-column is-local">
+        <div className="boundary-side" data-scope="local">
           <h3>
-            <span className="boundary-label">Local</span> What never leaves this browser
+            <span className="seal-glyph" aria-hidden="true" />
+            Local <span>what never leaves this browser</span>
           </h3>
-          <dl>
-            {disclosure.local.map((row) => (
-              <div key={row.label}>
-                <dt>{row.label}</dt>
-                <dd className="disclosure-value">{row.value}</dd>
-                <p>{row.detail}</p>
-              </div>
-            ))}
-          </dl>
+          <Rows rows={disclosure.local} />
         </div>
       </div>
 
-      <details className="observer-blob">
+      <details className="observer-record">
         <summary>The public record, verbatim</summary>
         <pre>{serializePublicLedger(disclosure)}</pre>
         {stage === 'sealed' && lastScore !== null && (
-          <p className="privacy-note">
-            Search this block for {lastScore.score}. It is not there, and it will not be until the
+          <p>
+            Search this record for {lastScore.score}. It is not there, and it will not be until the
             reveal phase opens the commitment.
           </p>
         )}
