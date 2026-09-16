@@ -10,10 +10,10 @@ and the tally is publicly verifiable once it is opened.
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Live demo**        | `TODO_DEMO_URL`                                                                                                                    |
 | **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                              |
-| **Preprod contract** | `3f390d6c373fcc40223dd0539e1ae1b73de7904ad55adf7db7e0de83823ad7c2`                                                                 |
+| **Preprod contract** | redeploy pending — the current build changed two verifier keys                                                                     |
 | **Network**          | Midnight Preprod                                                                                                                   |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 169 (`pnpm test`)                                                                                                                  |
+| **Tests**            | 212 (`pnpm test`)                                                                                                                  |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -72,30 +72,33 @@ stateDiagram-v2
     REVEAL --> REVEAL: revealScore
 ```
 
-| Circuit             | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                    |
-| ------------------- | ----------- | ------------------------- | ------------------------------------- | ---------------------------------------------------- |
-| `registerReviewer`  | `SETUP`     | `adminSecret`             | `reviewers`, `reviewerTree`           | rejects an already-registered pseudonym              |
-| `registerApplicant` | `SETUP`     | `adminSecret`             | `applicantTree`                       | one nullifier per applicant makes re-enrolling inert |
-| `openApplications`  | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                             |
-| `apply`             | `APPLY`     | an enrollment opening     | `applyNullifiers`, `applications`     | `applyNullifier(roundId, secret)`                    |
-| `openReview`        | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                             |
-| `openReveal`        | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                             |
-| `commitScore`       | `REVIEW`    | a Merkle membership proof | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`     |
-| `revealScore`       | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed from the set once opened   |
+| Circuit             | Phase guard | Authorized by             | Writes to the ledger                  | Replay protection                                                                                   |
+| ------------------- | ----------- | ------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `registerReviewer`  | `SETUP`     | `adminSecret`             | `reviewers`, `reviewerTree`           | rejects an already-registered pseudonym                                                             |
+| `registerApplicant` | `SETUP`     | `adminSecret`             | `applicantTree`                       | a re-issued enrollment only adds a leaf; the applicant's own nullifier still allows one application |
+| `openApplications`  | `SETUP`     | `adminSecret`             | `phase`                               | phase guard is the guard                                                                            |
+| `apply`             | `APPLY`     | an enrollment opening     | `applyNullifiers`, `applications`     | `applyNullifier(roundId, secret)`                                                                   |
+| `openReview`        | `APPLY`     | `adminSecret`             | `phase`                               | phase guard is the guard                                                                            |
+| `openReveal`        | `REVIEW`    | `adminSecret`             | `phase`                               | phase guard is the guard                                                                            |
+| `commitScore`       | `REVIEW`    | a Merkle membership proof | `scoreNullifiers`, `scoreCommitments` | `scoreNullifier(roundId, applicationId, secret)`                                                    |
+| `revealScore`       | `REVEAL`    | knowing the opening       | `scoreSums`, `revealedCounts`         | the commitment is removed once opened, and the application must be in `applications`                |
 
-Four properties are worth reading the contract for
+These properties are worth reading the contract for
 ([`packages/contract/src/aequira.compact`](packages/contract/src/aequira.compact)):
 
 - **The reviewer is authorized without being named.** `commitScore` reconstructs the
   roster's Merkle root from a private path, so the ledger learns that some registered
   reviewer scored, not which one. See [Reviewer unlinkability](#reviewer-unlinkability).
-- **Eligibility is proven without the figures behind it.** `apply` recomputes the
-  institution's enrollment commitment from private attributes, proves it is in the
-  applicant tree, and compares the income band and grade average against the round's
-  published thresholds. The ledger gains a nullifier and a pseudonym; the income band,
-  grade average and region never leave the circuit. Because the applicant's secret
-  never reaches the institution, not even the institution that enrolled them can match
-  an application back to a person.
+- **Eligibility is proven without the figures behind it, and the figures are the
+  institution's.** The institution verifies an applicant's attributes, draws a salt
+  and registers `enrollmentLeaf(attributes, applicantId, salt)` — it never sees the
+  secret behind that ID. It hands the applicant the attributes and salt privately, as
+  an enrollment receipt. `apply` then rebuilds the same leaf from the applicant's own
+  secret, proves it is in the applicant tree, and compares the income band and grade
+  average against the round's published thresholds. A client that swaps in figures the
+  institution did not verify cannot reopen the commitment, so no path matches. The
+  ledger gains a nullifier and a pseudonym; the figures never leave the circuit, and
+  not even the enrolling institution can match an application back to a person.
 - **The score is range-proven while hidden.** `commitScore` asserts `score <= 100`
   against a witness value and publishes only `persistentCommit(…score…, salt)`.
 - **The nullifier is scoped to one application.** It is derived from the round, the
@@ -104,6 +107,10 @@ Four properties are worth reading the contract for
 - **Revealing consumes the commitment.** `revealScore` removes the commitment from
   `scoreCommitments` before incrementing the tally, so the same ballot cannot be
   counted twice.
+- **Only real applications reach the tally.** `commitScore` cannot check the
+  application without naming it, which is exactly what the sealed phase hides — so
+  `revealScore` checks instead, once the identifier is public anyway. A commitment to
+  an invented identifier is accepted during review and can never be opened.
 
 `Phase.FINALIZED` and `Phase.CLAIMED` are declared in the enum but no circuit
 transitions into them at this level. They are the reserved slots for award
@@ -126,7 +133,7 @@ carries an adjacent comment stating why publishing that value is safe.
 | `reviewerTree` — the same roster, as a Merkle tree      | `reviewerMerklePath` — proves membership                                             |
 | `maxIncomeBand`, `minGpaScaled` — the published rules   | `applicantSecret` — identifies the applicant                                         |
 | `applicantTree` — enrollment commitments                | `applicantIncomeBand`, `applicantGpaScaled`, `applicantRegionCode` — never disclosed |
-| `applyNullifiers` — one application per applicant       | `applicantSalt` — opens the enrollment commitment                                    |
+| `applyNullifiers` — one application per applicant       | `applicantSalt` — the institution's salt, from the enrollment receipt                |
 | `applications` — unlinkable application pseudonyms      | `applicantMerklePath` — proves enrollment                                            |
 | `scoreCommitments` — salted score commitments           |                                                                                      |
 | `scoreNullifiers` — replay protection                   |                                                                                      |
@@ -141,20 +148,23 @@ that a valid score exists without the chain ever holding it.
 
 ### Who holds what
 
-| Role              | Holds privately                               | Can do                                                        | Cannot do                                                             |
-| ----------------- | --------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Administrator** | `adminSecret`                                 | register reviewers, advance the phase                         | read, alter or forge any score                                        |
-| **Reviewer**      | `reviewerSecret`, `reviewScore`, `reviewSalt` | score each application once, open their own score in `REVEAL` | score twice, read another reviewer's sealed score, score unregistered |
-| **Observer**      | nothing                                       | read the phase, the commitment count, the opened tally        | recover a score, a salt, or any secret                                |
+| Role              | Holds privately                                   | Can do                                                        | Cannot do                                                             |
+| ----------------- | ------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Administrator** | `adminSecret`, each applicant's verified figures  | register reviewers, enroll applicants, advance the phase      | read, alter or forge any score; link an application to an applicant   |
+| **Applicant**     | `applicantSecret`, the receipt's figures and salt | apply once, proving the figures clear the published rules     | apply twice, or pass off figures the institution did not verify       |
+| **Reviewer**      | `reviewerSecret`, `reviewScore`, `reviewSalt`     | score each application once, open their own score in `REVEAL` | score twice, read another reviewer's sealed score, score unregistered |
+| **Observer**      | nothing                                           | read the phase, the commitment count, the opened tally        | recover a score, a salt, or any secret                                |
 
-The administrator is deliberately powerless over ballots. `adminAuthority` is a
+The administrator decides who is eligible — that is the institution's job — but is
+deliberately powerless over ballots. `adminAuthority` is a
 domain-separated hash of the admin secret, so holding it proves the right to advance
 the round and nothing else — there is no circuit that lets it touch a commitment.
 
 ### What an observer can learn
 
 - The round phase, the round identifier, and the number of registered reviewers.
-- Which reviewer pseudonyms are authorized.
+- Which reviewer pseudonyms are authorized, how many enrollment commitments the
+  institution registered, and which application pseudonyms were submitted.
 - How many sealed commitments and nullifiers exist, and therefore how many scores
   were cast for each application.
 - After the reveal phase: the score sum and reviewer count per application.
@@ -219,7 +229,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 169 tests: 23 contract, 29 sdk, 71 ui, 46 cli
+pnpm test            # 212 tests: 26 contract, 37 sdk, 87 ui, 62 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -234,8 +244,9 @@ Then read four things, in this order:
    whole privacy argument, in one file.
 2. [`packages/ui/test/privacy-view.test.mjs`](packages/ui/test/privacy-view.test.mjs) —
    asserts the serialized public ledger view never contains a committed score.
-3. [`packages/ui/src/round-salt.ts`](packages/ui/src/round-salt.ts) — why the salt is
-   derived rather than random, explained under [Architecture](#architecture).
+3. [`packages/sdk/src/client.ts`](packages/sdk/src/client.ts) — `deriveScoreSalt` and
+   `deriveApplicationNonce`: why both are derived rather than random, explained under
+   [Architecture](#architecture).
 4. [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 generated ZK
    assets (prover key, verifier key, ZKIR and binary ZKIR per circuit), tracked in Git
    so the build output is reviewable without running the compiler.
@@ -255,7 +266,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 169 tests, no proof server needed
+pnpm test                   # 212 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -264,19 +275,22 @@ Open `http://127.0.0.1:3000` in Chrome. Then:
 
 1. **Connect Lace.** The app enumerates every wallet injected under
    `window.midnight` and requires a Preprod address.
-2. **Deploy a new round**, choosing a local-only storage password. The password
-   encrypts private state in this browser and is never sent to Lace or the network.
-3. **Register the reviewer pseudonym** shown in the organizer panel — it is the
+2. **Deploy a new round**, choosing a local-only storage password and the round's
+   eligibility rules. The password encrypts private state in this browser and is
+   never sent to Lace or the network.
+3. **Register the reviewer pseudonym** the organizer panel starts with — it is the
    one-way hash of this browser's reviewer secret.
-4. **Enroll** in the applicant panel with an income band, scaled grade average and
-   region code, then **register** the enrollment leaf it prints — the same browser
-   plays both roles here, but nothing stops a different one from computing the leaf.
-5. **Open applications**, then **submit the application**.
-6. **Open review**, then **commit a sealed score** for an application ID (any
-   32-byte hex value — `commitScore` does not check it against `applications`, see
-   [How a round works](#how-a-round-works)).
+4. **Enroll an applicant.** Copy the applicant ID from the applicant panel, paste it
+   into the organizer panel with the figures you verified, and register. The receipt
+   that appears is private: in this demo one browser plays both roles, so
+   **Import into this browser** hands it straight over. Two browsers would pass it
+   out of band instead.
+5. **Open applications**, then **submit the application**. The applicant panel shows
+   the public application ID once it is on chain.
+6. **Open review**, then **commit a sealed score** for one of the submitted
+   applications in the reviewer's picker.
 7. **Open reveal**, then **reveal** the same score. The tally appears in the ledger
-   panel.
+   panel, and the privacy panel shows the commitment leaving the sealed set.
 
 > Keep the browser's site data for this origin. The administrator and reviewer
 > secrets live in encrypted IndexedDB storage keyed to the Lace shielded address;
@@ -326,8 +340,11 @@ packages/ui         React + Vite browser app
 Two conventions are worth knowing before reading the UI:
 
 **Testable logic lives outside React.** `round-inputs`, `round-format`,
-`privacy-view`, `session-storage` and `proof-mode` are pure modules with
-`node:test` coverage; components stay dumb.
+`round-actions`, `privacy-view`, `session-storage`, `provider-security`,
+`deployment-errors` and `proof-mode` are pure modules with `node:test` coverage;
+components stay dumb. `round-actions` in particular decides what each role may do
+in the current phase, and why not — so a button can explain itself before a proof
+is spent.
 `packages/ui/tsconfig.test-build.json` lists exactly what the test build compiles.
 
 **The score salt is derived, not random.** `AequiraPrivateState` holds one
@@ -361,39 +378,49 @@ pnpm --filter @aequira/cli start funding-status  --network preprod
 pnpm --filter @aequira/cli start register-dust   --network preprod
 pnpm --filter @aequira/cli doctor
 
-pnpm --filter @aequira/cli start deploy --network preprod --round-id ROUND_ID_64_HEX
+pnpm --filter @aequira/cli start deploy --network preprod --round-id ROUND_ID_64_HEX \
+  --max-income-band 3 --min-gpa-scaled 300
 pnpm --filter @aequira/cli start join   --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start register-reviewer  --network preprod --contract-address ADDRESS --reviewer-id ID_64_HEX
-pnpm --filter @aequira/cli start enroll-applicant   --network preprod --contract-address ADDRESS
-pnpm --filter @aequira/cli start register-applicant --network preprod --contract-address ADDRESS --enrollment-leaf LEAF_64_HEX
+pnpm --filter @aequira/cli start register-applicant --network preprod --contract-address ADDRESS --applicant-id ID_64_HEX
+pnpm --filter @aequira/cli start import-enrollment  --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start open-applications --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start apply             --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start open-review       --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start commit-score      --network preprod --contract-address ADDRESS --application-id ID_64_HEX
 pnpm --filter @aequira/cli start open-reveal       --network preprod --contract-address ADDRESS
 pnpm --filter @aequira/cli start reveal-score      --network preprod --contract-address ADDRESS --application-id ID_64_HEX
+pnpm --filter @aequira/cli start round-status      --network preprod --contract-address ADDRESS
 ```
 
 Secrets are only ever read through masked interactive prompts; the argument parser
-rejects `--seed`, `--password`, `--score` and similar outright. Both `commit-score`
-and `reveal-score` prompt for the score and derive its salt deterministically
-(see above) — `reveal-score` re-prompts rather than trusting whatever the
-single private-state slot currently holds, so revealing one application still
-works after committing a different one. Deploy and state-changing calls stop
-before building a transaction when the synchronized Dust balance is zero.
-Successful calls write an encrypted, password-authenticated backup that `restore`
-can read back into an empty store without overwriting anything.
+rejects `--seed`, `--password`, `--score` and similar outright, and never echoes an
+argument it refuses. Both `commit-score` and `reveal-score` prompt for the score and
+derive its salt deterministically (see above) — `reveal-score` re-prompts rather than
+trusting whatever the single private-state slot currently holds, so revealing one
+application still works after committing a different one. `commit-score` asks twice
+and refuses an application that was never submitted, or one this reviewer already
+scored: the nullifier would make either mistake permanent. `reveal-score` refuses a
+score that does not reopen a recorded commitment before touching private state.
+Deploy and state-changing calls stop before building a transaction when the
+synchronized Dust balance is zero. Successful calls write an encrypted,
+password-authenticated backup that `restore` can read back into a store that already
+holds other rounds, without overwriting anything.
 
-`enroll-applicant` also prompts (income band, scaled grade average, region code)
-rather than taking them as arguments, for the same reason the score is prompted:
-they are private applicant data. It computes the enrollment leaf entirely
-locally — via the same `applicantLeaf` derivation `apply` itself uses to find its
-Merkle path — and prints only the resulting `enrollmentLeaf` and `applicantId`
-for the institution to pass to `register-applicant`. Neither the attributes nor
-the applicant secret behind them are ever transmitted. `apply`'s commitment
-randomness is likewise derived from `(roundId, applicantSecret)` rather than
-drawn at random, so a future claim can reproduce it without a new private-state
-field (see `deriveApplicationNonce` in `packages/sdk/src/client.ts`).
+Enrollment runs between two people. The applicant runs `join` and hands over the
+`applicantId` it prints. The institution runs `register-applicant`, typing the
+figures it verified at masked prompts, and gets back an `enrollmentReceipt` carrying
+those figures and the salt it drew — private, to be passed to the applicant out of
+band. The applicant runs `import-enrollment`, which checks the receipt against the
+round and their own secret before storing it. `apply` refuses to run without it, and
+prints the public `applicationId` it submitted. That commitment randomness is derived
+from `(roundId, applicantSecret)` rather than drawn at random, so a future claim can
+reproduce it without a new private-state field (see `deriveApplicationNonce` in
+`packages/sdk/src/client.ts`).
+
+`round-status` reads the public ledger alone — no wallet, no password, no private
+state — and lists the phase, the rules, the roster size and every submitted
+application with its tally. It is how a reviewer finds an application ID.
 
 ---
 
@@ -406,6 +433,9 @@ the reviewer pseudonym → commit a sealed score with the disclosure panel in fr
 open reveal → reveal, and the on-chain tally moving to match the opened score.
 
 ## Screenshots
+
+The compile output and deployed-contract shots predate the current build, which
+changed the `apply` and `revealScore` keys; both are retaken with the redeploy.
 
 |                                 |                                                     |
 | ------------------------------- | --------------------------------------------------- |
@@ -435,8 +465,8 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
-| Passing test suite                         | 169 tests, `pnpm test`; CI `verify` job                                          |
-| Deployed to Preprod with a visible address | table at the top of this file                                                    |
+| Passing test suite                         | 212 tests, `pnpm test`; CI `verify` job                                          |
+| Deployed to Preprod with a visible address | table at the top of this file — redeploy pending for the current build           |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
 | Meaningful commit history                  | `git log --oneline` — well past the 5-commit minimum                             |
@@ -455,7 +485,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 169                                                                  |
+| Minimum 3 tests passing              | 212                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |
