@@ -5,6 +5,7 @@ import {
   ROUND_STEP_COUNT,
   roundStepPosition,
   roundSteps,
+  unreachableRoundStep,
   type RoundStepId,
 } from '../round-steps.js';
 import { ContractPanel } from './ContractPanel.js';
@@ -63,6 +64,38 @@ export const RoundWizard = ({ round, wallet }: RoundWizardProps) => {
   };
   const steps = roundSteps(progress);
   const step = currentRoundStep(progress);
+  const stranded = unreachableRoundStep(progress);
+
+  // Phases only move forward, so a step missed before its deadline cannot be
+  // taken now and the round can never be finished. Rounds opened by an older
+  // build reach this, and saying so beats offering a form that cannot work.
+  if (stranded !== null) {
+    return (
+      <section className="panel wizard" aria-labelledby="wizard-heading">
+        <header className="panel-header">
+          <div>
+            <p className="panel-label">This round cannot be finished</p>
+            <h2 className="panel-title" id="wizard-heading">
+              {stranded.title} was missed before it closed
+            </h2>
+          </div>
+          <span className="chip" data-tone="danger">
+            {round.view?.phaseLabel ?? 'Unknown phase'}
+          </span>
+        </header>
+        <p className="panel-text">
+          {stranded.summary} The round has moved past the phase that allowed it, and phases only
+          move forward, so the remaining steps can never be completed. Open a new round to walk it
+          through from the start.
+        </p>
+        <div className="button-row">
+          <button className="button button-primary" onClick={round.clear} type="button">
+            Leave this round
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   if (step === null) {
     return (

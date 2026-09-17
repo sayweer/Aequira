@@ -53,6 +53,13 @@ type StepDefinition = {
   readonly id: RoundStepId;
   readonly title: string;
   readonly summary: string;
+  /**
+   * The last phase in which this step can still be taken. A round that moves
+   * past it without the step being done can never be finished: registration is
+   * setup-only, applying closes with the phase, and scoring closes when reveal
+   * opens. Steps without a deadline are left undefined.
+   */
+  readonly closesAfter?: number;
   isDone(input: RoundStepInput): boolean;
 };
 
@@ -74,18 +81,21 @@ const DEFINITIONS: readonly StepDefinition[] = [
   },
   {
     id: 'register',
+    closesAfter: PHASE.SETUP,
     title: 'Register the reviewer',
     summary: 'Only registered pseudonyms can seal a score, and only setup can register them.',
     isDone: ({ local }) => local?.isRegisteredReviewer === true,
   },
   {
     id: 'enrollment',
+    closesAfter: PHASE.SETUP,
     title: 'Enroll an applicant',
     summary: 'The figures you verified go into a commitment and a private receipt, never on chain.',
     isDone: ({ local }) => local?.enrolledOnChain === true,
   },
   {
     id: 'receipt',
+    closesAfter: PHASE.APPLY,
     title: 'Import the receipt',
     summary: 'The applicant needs the receipt before they can prove they clear the rules.',
     isDone: ({ local }) => local?.receiptImported === true,
@@ -98,6 +108,7 @@ const DEFINITIONS: readonly StepDefinition[] = [
   },
   {
     id: 'apply',
+    closesAfter: PHASE.APPLY,
     title: 'Submit the application',
     summary: 'The proof shows the rules are met. The ledger gets a pseudonym and nothing else.',
     isDone: ({ local }) => local?.hasApplied === true,
@@ -110,6 +121,7 @@ const DEFINITIONS: readonly StepDefinition[] = [
   },
   {
     id: 'commit',
+    closesAfter: PHASE.REVIEW,
     title: 'Seal a score',
     summary: 'The commitment goes public. The score stays in this browser.',
     // A commit that has been made is known here before the indexer catches up,
@@ -151,3 +163,35 @@ export const roundStepPosition = (id: RoundStepId): number =>
   DEFINITIONS.findIndex((definition) => definition.id === id) + 1;
 
 export const ROUND_STEP_COUNT = DEFINITIONS.length;
+
+/**
+ * The step this round can no longer take, or null while it is still finishable.
+ *
+ * Phases only move forward, so a step left undone past its deadline strands the
+ * round. Saying so is the difference between a dead form and an explanation.
+ */
+export const unreachableRoundStep = (input: RoundStepInput): RoundStep | null => {
+  const { phase } = input;
+
+  if (phase === null) {
+    return null;
+  }
+
+  const stranded = DEFINITIONS.find(
+    (definition) =>
+      definition.closesAfter !== undefined &&
+      phase > definition.closesAfter &&
+      !definition.isDone(input),
+  );
+
+  if (stranded === undefined) {
+    return null;
+  }
+
+  return {
+    id: stranded.id,
+    title: stranded.title,
+    summary: stranded.summary,
+    done: false,
+  };
+};

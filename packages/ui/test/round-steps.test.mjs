@@ -7,6 +7,7 @@ import {
   ROUND_STEP_COUNT,
   roundStepPosition,
   roundSteps,
+  unreachableRoundStep,
 } from '../.test-build/round-steps.js';
 
 const local = (overrides = {}) => ({
@@ -147,4 +148,57 @@ test('reports every step with its own done flag, in a stable order', () => {
     assert.ok(step.title.length > 0);
     assert.ok(step.summary.length > 0);
   }
+});
+
+test('reports a round that can no longer be finished, naming the step that closed', () => {
+  // Both rounds the hosted build left behind: no reviewer was registered and the
+  // phase moved on, so registration can never happen and no score can follow.
+  const open = (phase, status = {}) =>
+    unreachableRoundStep(
+      input({
+        address: 'ab'.repeat(32),
+        connected: true,
+        local: local(status),
+        phase,
+      }),
+    );
+
+  assert.equal(open(PHASE.APPLY)?.id, 'register');
+  assert.equal(open(PHASE.REVEAL)?.id, 'register');
+  assert.equal(open(PHASE.APPLY, { isRegisteredReviewer: true })?.id, 'enrollment');
+});
+
+test('leaves a round alone while every deadline is still ahead of it', () => {
+  const ready = { enrolledOnChain: true, isRegisteredReviewer: true, receiptImported: true };
+  const at = (phase, status = {}) =>
+    unreachableRoundStep(
+      input({ address: 'ab'.repeat(32), connected: true, local: local(status), phase }),
+    );
+
+  assert.equal(at(PHASE.SETUP), null);
+  assert.equal(at(PHASE.APPLY, ready), null);
+  assert.equal(at(PHASE.REVIEW, { ...ready, hasApplied: true }), null);
+  // Nothing is stranded before the ledger has been read.
+  assert.equal(unreachableRoundStep(input({ connected: true })), null);
+});
+
+test('strands scoring when reveal opens with no sealed score', () => {
+  const ready = {
+    enrolledOnChain: true,
+    hasApplied: true,
+    isRegisteredReviewer: true,
+    receiptImported: true,
+  };
+
+  assert.equal(
+    unreachableRoundStep(
+      input({
+        address: 'ab'.repeat(32),
+        connected: true,
+        local: local(ready),
+        phase: PHASE.REVEAL,
+      }),
+    )?.id,
+    'commit',
+  );
 });
