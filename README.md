@@ -8,7 +8,7 @@ and the tally is publicly verifiable once it is opened.
 
 |                      |                                                                                                                                                                                         |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Live demo**        | `TODO_DEMO_URL`                                                                                                                                                                         |
+| **Live demo**        | https://aequira-ui-rho.vercel.app                                                                                                                                                       |
 | **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                                                                                   |
 | **Preprod contract** | [`a1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b`](https://preprod.midnightexplorer.com/contracts/0xa1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b) |
 | **Network**          | Midnight Preprod                                                                                                                                                                        |
