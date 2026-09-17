@@ -59,10 +59,10 @@ provider. That smoke-test transaction was not balanced, funded, or submitted.
 
 The contract has since been deployed to Preprod for real, from the browser app
 through Lace. The current deployment is
-`a1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b`, deploy
+`6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272`, deploy
 transaction
-`38f8b0ec6519ba814ad889583516cfd67de804690567766421128aa03bacc18a` in block
-`2591847`, which the official Preprod indexer returns as a `ContractDeploy`.
+`e47dab524fa170c87ce1610bdc9153991668e596c6ffd4791944f9d4ccd9d8d3` in block
+`2592893`, which the official Preprod indexer returns as a `ContractDeploy`.
 
 Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will

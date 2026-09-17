@@ -10,7 +10,7 @@ and the tally is publicly verifiable once it is opened.
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Live demo**        | https://aequira-ui-rho.vercel.app                                                                                                                                                       |
 | **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                                                                                   |
-| **Preprod contract** | [`a1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b`](https://preprod.midnightexplorer.com/contracts/0xa1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b) |
+| **Preprod contract** | [`6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272`](https://preprod.midnightexplorer.com/contracts/0x6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272) |
 | **Network**          | Midnight Preprod                                                                                                                                                                        |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`)                                                      |
 | **Tests**            | 212 (`pnpm test`)                                                                                                                                                                       |
@@ -463,7 +463,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
 | Passing test suite                         | 212 tests, `pnpm test`; CI `verify` job                                          |
-| Deployed to Preprod with a visible address | table at the top of this file; `ContractDeploy` in block 2591847                 |
+| Deployed to Preprod with a visible address | table at the top of this file; `ContractDeploy` in block 2592893                 |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
 | Meaningful commit history                  | `git log --oneline` — well past the 5-commit minimum                             |
