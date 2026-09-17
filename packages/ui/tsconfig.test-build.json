@@ -18,6 +18,7 @@
     "src/round-actions.ts",
     "src/round-format.ts",
     "src/round-inputs.ts",
+    "src/round-steps.ts",
     "src/session-storage.ts",
     "src/wallet.ts"
   ]
