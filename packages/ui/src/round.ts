@@ -39,6 +39,7 @@ import { withDeploymentStage } from './deployment-errors.js';
 import { createRandomPrivateState, deployNewAequira } from './deployment.js';
 import type { LastScore } from './privacy-view.js';
 import type { ProofMode } from './proof-mode.js';
+import { revealRejection } from './round-actions.js';
 import {
   bytesToHex,
   hexToBytes,
@@ -410,10 +411,13 @@ export const revealScore = async (session: RoundSession, input: ScoreInput): Pro
   const { opening, privateState } = await buildOpening(session, input);
   const ledger = await readLedger(session);
 
-  if (!ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex))) {
-    throw new InputError(
-      'That score does not open the commitment recorded on chain for this application.',
-    );
+  const rejection = revealRejection({
+    hasSealedScore: ledger.scoreNullifiers.member(hexToBytes(opening.nullifierHex)),
+    scoreOpensCommitment: ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex)),
+  });
+
+  if (rejection !== null) {
+    throw new InputError(rejection);
   }
 
   await withDeploymentStage('private-state-update', () =>

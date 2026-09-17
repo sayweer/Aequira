@@ -118,7 +118,14 @@ const decide = (action: RoundAction, phase: number, local: LocalStatus): Availab
         : blocked('This browser’s reviewer pseudonym is not on the roster.');
 
     case 'reveal':
-      return phase === PHASE.REVEAL ? available : blocked('Scores open during reveal.');
+      if (phase !== PHASE.REVEAL) {
+        return blocked('Scores open during reveal.');
+      }
+      // Committing requires the roster, so a browser that is not on it can hold
+      // no sealed score, and every opening it offers would be refused.
+      return local.isRegisteredReviewer
+        ? available
+        : blocked('This browser’s reviewer pseudonym is not on the roster.');
   }
 };
 
@@ -136,4 +143,29 @@ export const actionAvailability = (
     return blocked(null);
   }
   return decide(action, phase, local);
+};
+
+/**
+ * Why an opening cannot be submitted, or null when it can.
+ *
+ * The distinction matters more than it looks. A reviewer's score nullifier is
+ * derived from the round, the application and their own secret — never from the
+ * score — so when it is absent from the ledger no score will ever open
+ * anything. Reporting that as a wrong score sends a reviewer through every
+ * number in the rubric, which is exactly what happened once.
+ */
+export const revealRejection = ({
+  hasSealedScore,
+  scoreOpensCommitment,
+}: {
+  readonly hasSealedScore: boolean;
+  readonly scoreOpensCommitment: boolean;
+}): string | null => {
+  if (!hasSealedScore) {
+    return 'This browser has no sealed score for that application, so there is nothing to open and no score will work. A reviewer has to be registered while the round is in setup, then commit during review.';
+  }
+  if (!scoreOpensCommitment) {
+    return 'That score does not open the commitment recorded on chain for this application.';
+  }
+  return null;
 };

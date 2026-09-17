@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { actionAvailability, focusRole, PHASE, phaseSteps } from '../.test-build/round-actions.js';
+import {
+  actionAvailability,
+  focusRole,
+  PHASE,
+  phaseSteps,
+  revealRejection,
+} from '../.test-build/round-actions.js';
 
 const status = (overrides = {}) => ({
   applicantIdHex: 'aa'.repeat(32),
@@ -88,7 +94,7 @@ test('accepts a receipt until the applicant applies or review opens', () => {
   );
 });
 
-test('lets a rostered reviewer commit during review and anyone reveal during reveal', () => {
+test('gates both commit and reveal on the roster, each in its own phase', () => {
   assert.equal(actionAvailability('commit', at(PHASE.REVIEW)).enabled, true);
   assert.match(
     actionAvailability('commit', at(PHASE.REVIEW, status({ isRegisteredReviewer: false }))).reason,
@@ -112,4 +118,36 @@ test('disables everything without a reason while another action runs', () => {
 test('waits for the ledger and for private state before offering anything', () => {
   assert.match(actionAvailability('apply', at(null)).reason, /public ledger/);
   assert.match(actionAvailability('apply', at(PHASE.APPLY, null)).reason, /no secrets/);
+});
+
+test('says nothing can open a score this browser never sealed', () => {
+  // The state the hosted round reached: nobody was registered as a reviewer, so
+  // the round advanced to reveal with no commitment on chain and every score
+  // was refused. Reporting a wrong score there is a dead end.
+  const message = revealRejection({ hasSealedScore: false, scoreOpensCommitment: false });
+
+  assert.match(message, /no sealed score/);
+  assert.match(message, /no score will work/);
+  assert.match(message, /registered while the round is in setup/);
+  assert.doesNotMatch(message, /does not open the commitment/);
+});
+
+test('keeps the wrong-score message for a score that really is wrong', () => {
+  assert.match(
+    revealRejection({ hasSealedScore: true, scoreOpensCommitment: false }),
+    /does not open the commitment recorded on chain/,
+  );
+  assert.equal(revealRejection({ hasSealedScore: true, scoreOpensCommitment: true }), null);
+});
+
+test('does not offer reveal to a browser that is not on the reviewer roster', () => {
+  assert.equal(actionAvailability('reveal', at(PHASE.REVEAL)).enabled, true);
+
+  const offRoster = actionAvailability(
+    'reveal',
+    at(PHASE.REVEAL, status({ isRegisteredReviewer: false })),
+  );
+
+  assert.equal(offRoster.enabled, false);
+  assert.match(offRoster.reason, /not on the roster/);
 });
