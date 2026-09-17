@@ -1,10 +1,10 @@
 # AEQUIRA Version Matrix
 
-> Status: Compact development baseline and Docker-backed proof server verified;
-> Preprod deployment pending. Change a pinned version only after checking the
+> Status: Compact development baseline, Docker-backed proof server and Preprod
+> deployment all verified. Change a pinned version only after checking the
 > current official compatibility matrix and compiling the official example.
 >
-> Last checked: 2026-09-13
+> Last checked: 2026-09-17
 
 ## Workspace baseline
 
@@ -14,31 +14,31 @@
 | Local Node.js observed | 26.0.0  | `node --version`                                                    |
 | pnpm                   | 11.9.0  | `pnpm --version`                                                    |
 | TypeScript             | 5.9.3   | Root `package.json`                                                 |
-| Docker Desktop         | 4.84.0  | Running local installation                                          |
-| Docker Engine          | 29.6.2  | `docker version`                                                    |
-| Docker Compose         | 5.3.1   | `docker compose version`                                            |
+| Docker Desktop         | 4.87.0  | Running local installation                                          |
+| Docker Engine          | 29.7.2  | `docker version`                                                    |
+| Docker Compose         | 5.4.0   | `docker compose version`                                            |
 
 ## Midnight compatibility
 
-| Component                             | Version       | Evidence / status                                      |
-| ------------------------------------- | ------------- | ------------------------------------------------------ |
-| Compact devtools (`compact`)          | 0.5.1         | Installed; `compact --version`                         |
-| Compact compiler / toolchain          | 0.31.1        | Installed; `compact compile --version`; check is green |
-| Compact language version              | 0.23.0        | Compiler output and compiled official example          |
-| `@midnight-ntwrk/compact-runtime`     | 0.16.0        | Installed direct dependency                            |
-| `@midnight-ntwrk/compact-js`          | 2.5.1         | Installed through `midnight-js-protocol`               |
-| Platform JS                           | 2.2.4         | Installed through `midnight-js-protocol`               |
-| `midnight-js-protocol`                | 4.1.1         | Installed direct dependency                            |
-| `midnight-js-network-id`              | 4.1.1         | Installed in contract tests and CLI runtime            |
-| Other `@midnight-ntwrk/midnight-js-*` | 4.1.1         | Narrow CLI provider dependencies installed             |
-| `@midnight-ntwrk/dapp-connector-api`  | 4.0.1         | Installed and used by the browser app                  |
-| `@midnight-ntwrk/testkit-js`          | 4.1.1         | Official matrix and current example; install pending   |
-| Wallet SDK                            | 1.2.0         | Installed direct CLI dependency                        |
-| Ledger / on-chain runtime             | 8.1.0 / 3.0.0 | Installed transitively through the Compact stack       |
-| Preprod node                          | 1.0.0         | Official compatibility matrix; remote service          |
-| Midnight Indexer                      | 4.3.3         | Official compatibility matrix; remote service          |
-| Proof server image                    | 8.1.0         | Loopback-only; AEQUIRA deploy proof verified           |
-| Lace                                  | Pending       | Verify during the L2 wallet milestone                  |
+| Component                             | Version         | Evidence / status                                      |
+| ------------------------------------- | --------------- | ------------------------------------------------------ |
+| Compact devtools (`compact`)          | 0.5.1           | Installed; `compact --version`                         |
+| Compact compiler / toolchain          | 0.31.1          | Installed; `compact compile --version`; check is green |
+| Compact language version              | 0.23.0          | Compiler output and compiled official example          |
+| `@midnight-ntwrk/compact-runtime`     | 0.16.0          | Installed direct dependency                            |
+| `@midnight-ntwrk/compact-js`          | 2.5.1           | Installed through `midnight-js-protocol`               |
+| Platform JS                           | 2.2.4           | Installed through `midnight-js-protocol`               |
+| `midnight-js-protocol`                | 4.1.1           | Installed direct dependency                            |
+| `midnight-js-network-id`              | 4.1.1           | Installed in contract tests and CLI runtime            |
+| Other `@midnight-ntwrk/midnight-js-*` | 4.1.1           | Narrow CLI provider dependencies installed             |
+| `@midnight-ntwrk/dapp-connector-api`  | 4.0.1           | Installed and used by the browser app                  |
+| `@midnight-ntwrk/testkit-js`          | 4.1.1           | Official matrix and current example; install pending   |
+| Wallet SDK                            | 1.2.0           | Installed direct CLI dependency                        |
+| Ledger / on-chain runtime             | 8.1.0 / 3.0.0   | Installed transitively through the Compact stack       |
+| Preprod node                          | 1.0.0           | Official compatibility matrix; remote service          |
+| Midnight Indexer                      | 4.3.3           | Official compatibility matrix; remote service          |
+| Proof server image                    | 8.1.0           | Loopback-only; AEQUIRA deploy proof verified           |
+| Lace                                  | Connector 4.0.1 | Connected on Preprod; deployed the current contract    |
 
 ## Verification record
 
@@ -51,11 +51,18 @@ The pinned `midnightntwrk/proof-server:8.1.0` ARM64 image runs locally with
 digest `sha256:801bbc0340e9e96f16735f77b523f23c7459e3359842f7c79c2c53f4e994d531`.
 Docker publishes its port only on `127.0.0.1:6300`; the root endpoint returned
 HTTP 200 after all downloaded Zswap and Dust proving material was verified. The
-full Preprod `doctor` check passes for Node.js, 24 contract ZK assets, network
+full Preprod `doctor` check passes for Node.js, 32 contract ZK assets, network
 node, indexer, and proof server. A separate smoke test constructed an offline
 AEQUIRA deploy transaction from the compiled contract and its generated ZK
 assets, then successfully proved that transaction through the HTTP proof
-provider. The transaction was not balanced, funded, or submitted to Preprod.
+provider. That smoke-test transaction was not balanced, funded, or submitted.
+
+The contract has since been deployed to Preprod for real, from the browser app
+through Lace. The current deployment is
+`a1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b`, deploy
+transaction
+`38f8b0ec6519ba814ad889583516cfd67de804690567766421128aa03bacc18a` in block
+`2591847`, which the official Preprod indexer returns as a `ContractDeploy`.
 
 Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will
