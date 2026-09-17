@@ -99,6 +99,22 @@ const hasWalletFailureTag = (error: unknown, tag: string): boolean =>
 const WALLET_PROVING_MESSAGE =
   'Lace could not prove its fee payment. Lace sends that proof to the proof server chosen in Settings → Midnight → Proof Server; if it is Local, start it with pnpm proof-server:up and retry.';
 
+// A refused connection and an unreachable host look identical from here: both
+// arrive as a fetch failure with no host in the text. These let the mappers say
+// which one happened instead of always blaming the proof server.
+const CONNECTION_FAILURE_NEEDLES = [
+  'failed to fetch',
+  'load failed',
+  'network error',
+  'networkerror',
+];
+
+const isConnectionFailure = (message: string): boolean =>
+  CONNECTION_FAILURE_NEEDLES.some((needle) => message.includes(needle));
+
+const blockedByPolicyMessage = (blockedOrigins: readonly string[]): string =>
+  `This page is not allowed to connect to ${blockedOrigins.join(', ')}, so the request never left the browser. Those endpoints come from the wallet, so the deployment's Content-Security-Policy has to list them under connect-src.`;
+
 const collectErrorMessages = (error: unknown): string => {
   const messages: string[] = [];
 
@@ -135,7 +151,10 @@ const findDeploymentStage = (error: unknown): DeploymentStage | null => {
   return null;
 };
 
-export const toDeploymentErrorMessage = (error: unknown): string => {
+export const toDeploymentErrorMessage = (
+  error: unknown,
+  blockedOrigins: readonly string[] = [],
+): string => {
   if (error instanceof Error && error.name === 'DustUnavailableError') {
     return 'tDUST is not ready in Lace yet. Open the DUST Tank, finish generation, and retry.';
   }
@@ -173,6 +192,9 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   if (message.includes('outside midnight preprod')) {
     return 'Lace returned provider settings for another network. Select Midnight Preprod and retry.';
   }
+  if (blockedOrigins.length > 0 && isConnectionFailure(message)) {
+    return blockedByPolicyMessage(blockedOrigins);
+  }
   if (stage === 'proof-generation') {
     return 'The local proof request failed before Lace balancing. AEQUIRA kept the private witness on this machine; confirm the proof server is running and retry.';
   }
@@ -182,12 +204,11 @@ export const toDeploymentErrorMessage = (error: unknown): string => {
   if (stage === 'transaction-submission') {
     return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
   }
-  if (
-    message.includes('proof server') ||
-    message.includes('prover') ||
-    message.includes('failed to fetch')
-  ) {
+  if (message.includes('proof server') || message.includes('prover')) {
     return 'The local proof server could not be reached. Start it and retry the deployment.';
+  }
+  if (isConnectionFailure(message)) {
+    return 'A network request failed before the contract was deployed. Confirm that the indexer, node and proof-server endpoints Lace reports for Preprod are reachable from this page.';
   }
   if (message.includes('dust') || message.includes('insufficient') || message.includes('balance')) {
     return 'Lace could not fund the transaction with tDUST. Confirm that the DUST Tank is ready.';
@@ -297,7 +318,10 @@ const CONTRACT_ASSERTION_MESSAGES: readonly (readonly [string, string])[] = [
   ],
 ];
 
-export const toCircuitErrorMessage = (error: unknown): string => {
+export const toCircuitErrorMessage = (
+  error: unknown,
+  blockedOrigins: readonly string[] = [],
+): string => {
   if (error instanceof Error && error.name === 'DustUnavailableError') {
     return 'tDUST is not ready in Lace yet. Open the DUST Tank, finish generation, and retry.';
   }
@@ -336,6 +360,9 @@ export const toCircuitErrorMessage = (error: unknown): string => {
   if (message.includes('reject') || message.includes('declin') || message.includes('cancel')) {
     return 'The request was cancelled in Lace. No transaction was submitted.';
   }
+  if (blockedOrigins.length > 0 && isConnectionFailure(message)) {
+    return blockedByPolicyMessage(blockedOrigins);
+  }
   if (stage === 'proof-generation') {
     return 'The proof request failed before Lace balancing. AEQUIRA kept the private witness on this machine; confirm the prover is available and retry.';
   }
@@ -345,12 +372,11 @@ export const toCircuitErrorMessage = (error: unknown): string => {
   if (stage === 'transaction-submission') {
     return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
   }
-  if (
-    message.includes('proof server') ||
-    message.includes('prover') ||
-    message.includes('failed to fetch')
-  ) {
+  if (message.includes('proof server') || message.includes('prover')) {
     return 'The prover could not be reached. Confirm the proof server is running and retry.';
+  }
+  if (isConnectionFailure(message)) {
+    return 'A network request failed before the call completed. Confirm that the indexer, node and proof-server endpoints Lace reports for Preprod are reachable from this page.';
   }
   if (message.includes('dust') || message.includes('insufficient') || message.includes('balance')) {
     return 'Lace could not fund the transaction with tDUST. Confirm that the DUST Tank is ready.';

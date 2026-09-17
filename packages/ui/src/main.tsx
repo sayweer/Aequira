@@ -9,7 +9,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import App from './App.js';
+import { startRecordingBlockedRequests } from './blocked-requests.js';
 import './styles.css';
+
+startRecordingBlockedRequests();
 
 const root = document.getElementById('root');
 

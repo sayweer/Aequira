@@ -1,6 +1,7 @@
 import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { blockedRequestOrigins } from '../blocked-requests.js';
 import {
   getPrivateStatePasswordError,
   toCircuitErrorMessage,
@@ -292,8 +293,10 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
             action,
             message:
               action === 'deploy'
-                ? toDeploymentErrorMessage(caught)
-                : toActionErrorMessage(caught, toCircuitErrorMessage),
+                ? toDeploymentErrorMessage(caught, blockedRequestOrigins())
+                : toActionErrorMessage(caught, (failure) =>
+                    toCircuitErrorMessage(failure, blockedRequestOrigins()),
+                  ),
           });
         }
         return false;
@@ -344,7 +347,12 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
         return true;
       } catch (caught) {
         if (isCurrent()) {
-          setError({ action, message: toActionErrorMessage(caught, toCircuitErrorMessage) });
+          setError({
+            action,
+            message: toActionErrorMessage(caught, (failure) =>
+              toCircuitErrorMessage(failure, blockedRequestOrigins()),
+            ),
+          });
         }
         return false;
       } finally {
@@ -401,7 +409,9 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
       } catch (caught) {
         setError({
           action: 'deploy',
-          message: toActionErrorMessage(caught, toCircuitErrorMessage),
+          message: toActionErrorMessage(caught, (failure) =>
+            toCircuitErrorMessage(failure, blockedRequestOrigins()),
+          ),
         });
         return false;
       }

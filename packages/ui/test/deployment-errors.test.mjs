@@ -181,3 +181,65 @@ test('keeps the deployment messages byte-identical after adding circuit messages
     'The contract deployment pipeline stopped before submission. Keep the local proof server running and retry.',
   );
 });
+
+test('names the origin a Content-Security-Policy refused instead of blaming the proof server', () => {
+  // The exact shape the hosted build produced: the wallet reported its Preprod
+  // indexer on a host connect-src did not list, so every call was refused and
+  // arrived here as a bare fetch failure.
+  const refused = new DeploymentStageError('contract-deployment', new TypeError('Failed to fetch'));
+  const blocked = ['https://midnight-preprod.blockfrost.io'];
+
+  for (const message of [
+    toDeploymentErrorMessage(refused, blocked),
+    toCircuitErrorMessage(new DeploymentStageError('circuit-apply', refused), blocked),
+  ]) {
+    assert.match(message, /not allowed to connect to https:\/\/midnight-preprod\.blockfrost\.io/);
+    assert.match(message, /connect-src/);
+    assert.doesNotMatch(message, /proof server could not be reached/);
+    assert.doesNotMatch(message, /prover could not be reached/);
+  }
+});
+
+test('stops reading a bare fetch failure as an unreachable proof server', () => {
+  const fetchFailure = new DeploymentStageError(
+    'contract-deployment',
+    new TypeError('Failed to fetch'),
+  );
+
+  assert.match(
+    toDeploymentErrorMessage(fetchFailure),
+    /network request failed before the contract was deployed/,
+  );
+  assert.match(
+    toCircuitErrorMessage(new DeploymentStageError('circuit-apply', fetchFailure)),
+    /network request failed before the call completed/,
+  );
+});
+
+test('still points a genuine proof server failure at the proof server', () => {
+  assert.match(
+    toDeploymentErrorMessage(new Error('proof server refused the connection')),
+    /local proof server could not be reached/,
+  );
+  assert.match(
+    toCircuitErrorMessage(new Error('prover unavailable')),
+    /prover could not be reached/,
+  );
+});
+
+test('does not blame the policy for a failure that is not a connection failure', () => {
+  // A recorded violation is sticky, so it must not colour unrelated errors.
+  const blocked = ['https://midnight-preprod.blockfrost.io'];
+
+  assert.match(
+    toDeploymentErrorMessage(
+      new DeploymentStageError('wallet-balancing', { reason: 'private' }),
+      blocked,
+    ),
+    /could not balance the proven transaction/,
+  );
+  assert.doesNotMatch(
+    toDeploymentErrorMessage(new Error('secret-value-from-provider'), blocked),
+    /not allowed to connect/,
+  );
+});

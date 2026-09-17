@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/blocked-requests.ts",
     "src/deployment-errors.ts",
     "src/privacy-view.ts",
     "src/proof-mode.ts",
