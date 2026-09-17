@@ -69,7 +69,7 @@ does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
 The AEQUIRA contract compiles 8 state-changing circuits. The repository now
-passes 221 tracked `node:test` tests: 26 contract, 37 SDK, 96 browser, and 62
+passes 225 tracked `node:test` tests: 26 contract, 37 SDK, 100 browser, and 62
 CLI/runtime tests. Tests and the generated `managed/` output are tracked in Git and
 run in CI.
 The CLI tests include encrypted-at-rest private-state checks, wrong-password
