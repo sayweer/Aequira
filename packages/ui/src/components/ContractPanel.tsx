@@ -5,11 +5,13 @@ import { ActionButton } from './ActionButton.js';
 import { StageMessage } from './StageMessage.js';
 
 type ContractPanelProps = {
+  /** Rendered inside the wizard, which supplies the heading and the frame. */
+  readonly chromeless?: boolean;
   readonly enabled: boolean;
   readonly round: AequiraRound;
 };
 
-export const ContractPanel = ({ enabled, round }: ContractPanelProps) => {
+export const ContractPanel = ({ chromeless = false, enabled, round }: ContractPanelProps) => {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [addressInput, setAddressInput] = useState(round.rememberedAddress ?? '');
@@ -34,17 +36,8 @@ export const ContractPanel = ({ enabled, round }: ContractPanelProps) => {
     }
   };
 
-  return (
-    <section className="panel" aria-labelledby="contract-heading">
-      <header className="panel-header">
-        <div>
-          <p className="panel-label">Step 2</p>
-          <h2 className="panel-title" id="contract-heading">
-            Open a round
-          </h2>
-        </div>
-      </header>
-
+  const body = (
+    <>
       <fieldset className="field-group" disabled={locked}>
         <legend className="field-label">Local storage password</legend>
         <p className="field-hint">
@@ -146,13 +139,32 @@ export const ContractPanel = ({ enabled, round }: ContractPanelProps) => {
         </fieldset>
       </div>
 
-      {errorText !== null && (
+      {/* The wizard renders this step's errors itself, so it is not repeated there. */}
+      {!chromeless && errorText !== null && (
         <StageMessage
           onDismiss={round.dismissError}
           text={errorText}
           title="The round did not open"
         />
       )}
+    </>
+  );
+
+  if (chromeless) {
+    return body;
+  }
+
+  return (
+    <section className="panel" aria-labelledby="contract-heading">
+      <header className="panel-header">
+        <div>
+          <p className="panel-label">Step 2</p>
+          <h2 className="panel-title" id="contract-heading">
+            Open a round
+          </h2>
+        </div>
+      </header>
+      {body}
     </section>
   );
 };

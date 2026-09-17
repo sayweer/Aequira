@@ -233,13 +233,6 @@ main {
   font-size: var(--text-sm);
 }
 
-.session-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  gap: 1.5rem;
-  align-items: start;
-}
-
 /* Panels ------------------------------------------------------------------ */
 
 .panel {
@@ -276,18 +269,6 @@ main {
 
 .panel-text {
   color: var(--ink-muted);
-}
-
-.subsection {
-  display: grid;
-  gap: 0.75rem;
-  padding-top: 1.125rem;
-  border-top: 1px solid var(--line);
-}
-
-.subsection-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
 }
 
 .chip {
@@ -859,62 +840,46 @@ textarea:disabled {
   font-size: var(--text-sm);
 }
 
-/* Roles ------------------------------------------------------------------- */
+/* Wizard ------------------------------------------------------------------ */
 
-.role-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.5rem;
-  align-items: start;
-}
-
-/* The panel the phase is waiting on leads, full width; the other two follow. */
-.role-grid > :first-child {
-  grid-column: 1 / -1;
-}
-
-.role-panel[data-focus='true'] {
+/* One step at a time, so a required step cannot be skipped. Wide enough to
+   read, never wide enough to stretch an input across the viewport. */
+.wizard {
   border-color: var(--wax-line);
   box-shadow: inset 0 2px 0 var(--seal);
 }
 
-/* Full width is for emphasis, not for 1,100-pixel input fields. */
-.role-panel[data-focus='true'] > :not(.panel-header) {
-  max-width: 52rem;
+.wizard-body {
+  display: grid;
+  gap: 1.125rem;
+  align-content: start;
+  max-width: 44rem;
 }
 
-.role-panel[data-focus='false'] .panel-title {
-  font-size: var(--text-md);
-}
-
-.checklist {
+/* Where the round stands, at a glance: one mark per step. */
+.wizard-rail {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
-  color: var(--ink-faint);
-  font-size: var(--text-xs);
+  gap: 0.3rem;
 }
 
-.checklist li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+.wizard-rail li {
+  height: 0.25rem;
+  flex: 1 1 0;
+  border-radius: 999px;
+  background: var(--line);
 }
 
-.check-mark {
-  width: 0.875rem;
-  height: 0.875rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
+.wizard-rail li[data-state='done'] {
+  background: var(--success);
 }
 
-.checklist li[data-done='true'] {
-  color: var(--ink);
+.wizard-rail li[data-state='current'] {
+  background: var(--seal);
 }
 
-.checklist li[data-done='true'] .check-mark {
-  border-color: var(--success);
-  background: radial-gradient(circle, var(--success) 45%, transparent 50%);
+.chip-row {
+  display: flex;
+  gap: 0.5rem;
 }
 
 /* Ledger ------------------------------------------------------------------ */
@@ -1135,14 +1100,6 @@ textarea:disabled {
 /* Responsive -------------------------------------------------------------- */
 
 @media (max-width: 64rem) {
-  .role-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .role-grid > :first-child {
-    grid-column: auto;
-  }
-
   .stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1150,7 +1107,6 @@ textarea:disabled {
 
 @media (max-width: 52rem) {
   .intro,
-  .session-grid,
   .open-options,
   .boundary-grid {
     grid-template-columns: minmax(0, 1fr);

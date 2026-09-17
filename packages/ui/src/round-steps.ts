@@ -63,7 +63,7 @@ const DEFINITIONS: readonly StepDefinition[] = [
   {
     id: 'wallet',
     title: 'Connect your wallet',
-    summary: 'AEQUIRA asks Lace only for what a Preprod session needs.',
+    summary: 'Lace signs and pays for every call. AEQUIRA never sees a key.',
     isDone: ({ connected }) => connected,
   },
   {

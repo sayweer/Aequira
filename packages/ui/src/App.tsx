@@ -1,14 +1,9 @@
-import { AdminPanel } from './components/AdminPanel.js';
-import { ApplicantPanel } from './components/ApplicantPanel.js';
-import { ContractPanel } from './components/ContractPanel.js';
 import { LedgerPanel } from './components/LedgerPanel.js';
 import { PrivacyProofPanel } from './components/PrivacyProofPanel.js';
-import { ReviewPanel } from './components/ReviewPanel.js';
 import { RoundHeader } from './components/RoundHeader.js';
-import { WalletPanel } from './components/WalletPanel.js';
+import { RoundWizard } from './components/RoundWizard.js';
 import { useAequiraRound } from './hooks/useAequiraRound.js';
 import { useWalletConnection } from './hooks/useWalletConnection.js';
-import { focusRole, type RoundRole } from './round-actions.js';
 
 const STEPS = [
   {
@@ -25,24 +20,10 @@ const STEPS = [
   },
 ];
 
-const ROLE_ORDER: readonly RoundRole[] = ['organizer', 'applicant', 'reviewer'];
-
 const App = () => {
   const wallet = useWalletConnection();
   const round = useAequiraRound(wallet.connectedWallet?.api ?? null);
   const isOpen = round.address !== null;
-
-  const focus = focusRole(round.view?.phase ?? null);
-  // The panel the phase is waiting on comes first, and the grid gives it room.
-  const roles = [focus, ...ROLE_ORDER.filter((role) => role !== focus)];
-  const renderRole = (role: RoundRole) =>
-    role === 'organizer' ? (
-      <AdminPanel focus={role === focus} key={role} round={round} />
-    ) : role === 'applicant' ? (
-      <ApplicantPanel focus={role === focus} key={role} round={round} />
-    ) : (
-      <ReviewPanel focus={role === focus} key={role} round={round} />
-    );
 
   return (
     <div className="app-shell">
@@ -60,7 +41,7 @@ const App = () => {
         {isOpen ? (
           <>
             <RoundHeader round={round} wallet={wallet} />
-            <div className="role-grid">{roles.map(renderRole)}</div>
+            <RoundWizard round={round} wallet={wallet} />
             <LedgerPanel round={round} />
             <PrivacyProofPanel round={round} />
           </>
@@ -90,10 +71,7 @@ const App = () => {
               </ol>
             </section>
 
-            <div className="session-grid">
-              <WalletPanel busy={round.busy !== null} wallet={wallet} />
-              <ContractPanel enabled={wallet.isConnected} round={round} />
-            </div>
+            <RoundWizard round={round} wallet={wallet} />
 
             <section className="boundary is-preview" aria-labelledby="boundary-preview-heading">
               <div className="boundary-intro">

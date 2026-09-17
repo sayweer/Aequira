@@ -16,27 +16,17 @@ const STATUS: Record<
 
 type WalletPanelProps = {
   readonly busy: boolean;
+  /** Rendered inside the wizard, which supplies the heading and the frame. */
+  readonly chromeless?: boolean;
   readonly wallet: WalletConnection;
 };
 
-export const WalletPanel = ({ busy, wallet }: WalletPanelProps) => {
+export const WalletPanel = ({ busy, chromeless = false, wallet }: WalletPanelProps) => {
   const { connectedWallet, errorMessage, isConnected, selectedWallet, viewState, wallets } = wallet;
   const status = STATUS[viewState];
 
-  return (
-    <section className="panel" aria-labelledby="wallet-heading">
-      <header className="panel-header">
-        <div>
-          <p className="panel-label">Step 1</p>
-          <h2 className="panel-title" id="wallet-heading">
-            Connect your wallet
-          </h2>
-        </div>
-        <span className="chip" data-tone={status.tone} aria-live="polite">
-          {status.label}
-        </span>
-      </header>
-
+  const body = (
+    <>
       {viewState === 'detecting' && (
         <div className="skeleton" aria-busy="true" aria-label="Looking for Lace">
           <span />
@@ -147,6 +137,36 @@ export const WalletPanel = ({ busy, wallet }: WalletPanelProps) => {
           </button>
         </>
       )}
+    </>
+  );
+
+  if (chromeless) {
+    return (
+      <>
+        <div className="chip-row">
+          <span className="chip" data-tone={status.tone} aria-live="polite">
+            {status.label}
+          </span>
+        </div>
+        {body}
+      </>
+    );
+  }
+
+  return (
+    <section className="panel" aria-labelledby="wallet-heading">
+      <header className="panel-header">
+        <div>
+          <p className="panel-label">Step 1</p>
+          <h2 className="panel-title" id="wallet-heading">
+            Connect your wallet
+          </h2>
+        </div>
+        <span className="chip" data-tone={status.tone} aria-live="polite">
+          {status.label}
+        </span>
+      </header>
+      {body}
     </section>
   );
 };
