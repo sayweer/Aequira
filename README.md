@@ -6,14 +6,14 @@
 through a commit–reveal flow: the score is proven valid while it is still hidden,
 and the tally is publicly verifiable once it is opened.
 
-|                      |                                                                                                                                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **Live demo**        | `TODO_DEMO_URL`                                                                                                                    |
-| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                              |
-| **Preprod contract** | redeploy pending — the current build changed two verifier keys                                                                     |
-| **Network**          | Midnight Preprod                                                                                                                   |
-| **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`) |
-| **Tests**            | 212 (`pnpm test`)                                                                                                                  |
+|                      |                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Live demo**        | `TODO_DEMO_URL`                                                                                                                                                                         |
+| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                                                                                   |
+| **Preprod contract** | [`a1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b`](https://preprod.midnightexplorer.com/contracts/0xa1d73d665532ca835e1b7d0bc8639d3c79df970a1a1cbe4c8c99a0289ed8737b) |
+| **Network**          | Midnight Preprod                                                                                                                                                                        |
+| **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`)                                                      |
+| **Tests**            | 212 (`pnpm test`)                                                                                                                                                                       |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -434,9 +434,6 @@ open reveal → reveal, and the on-chain tally moving to match the opened score.
 
 ## Screenshots
 
-The compile output and deployed-contract shots predate the current build, which
-changed the `apply` and `revealScore` keys; both are retaken with the redeploy.
-
 |                                 |                                                     |
 | ------------------------------- | --------------------------------------------------- |
 | Compile output, circuits listed | ![compile](docs/screenshots/compile-output.png)     |
@@ -466,7 +463,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
 | Passing test suite                         | 212 tests, `pnpm test`; CI `verify` job                                          |
-| Deployed to Preprod with a visible address | table at the top of this file — redeploy pending for the current build           |
+| Deployed to Preprod with a visible address | table at the top of this file; `ContractDeploy` in block 2591847                 |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
 | Meaningful commit history                  | `git log --oneline` — well past the 5-commit minimum                             |
