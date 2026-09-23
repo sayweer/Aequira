@@ -56,9 +56,9 @@ type RoundWizardProps = {
 export const RoundWizard = ({ round, wallet }: RoundWizardProps) => {
   const progress = {
     address: round.address,
-    commitmentHexes: round.view?.commitmentHexes ?? [],
     connected: wallet.isConnected,
     lastScore: round.lastScore,
+    ledger: round.view,
     local: round.local,
     phase: round.view?.phase ?? null,
   };

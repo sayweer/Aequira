@@ -22,10 +22,28 @@ const local = (overrides = {}) => ({
   ...overrides,
 });
 
+// A ledger as `toRoundView` reports it. Empty is a round just deployed.
+const ledger = (overrides = {}) => ({
+  enrollmentLeafCount: 0,
+  nullifierCount: 0,
+  reviewerIdHexes: [],
+  tallies: [],
+  ...overrides,
+});
+
+const tally = (revealedCount = null) => ({
+  applicationIdHex: 'cc'.repeat(32),
+  revealedCount,
+  scoreSum: revealedCount === null ? null : 84,
+});
+
+// Every setup step taken, by whichever browser took it.
+const setUp = ledger({ enrollmentLeafCount: 1, reviewerIdHexes: ['bb'.repeat(32)] });
+
 const input = (overrides = {}) => ({
   address: null,
-  commitmentHexes: [],
   connected: false,
+  ledger: null,
   lastScore: null,
   local: null,
   phase: null,
@@ -47,6 +65,7 @@ test('registers the reviewer before anything else in setup', () => {
   const open = input({
     address: 'ab'.repeat(32),
     connected: true,
+    ledger: ledger(),
     local: local(),
     phase: PHASE.SETUP,
   });
@@ -56,22 +75,78 @@ test('registers the reviewer before anything else in setup', () => {
 });
 
 test('walks setup in order: reviewer, enrollment, receipt, then the transition', () => {
-  const at = (status) =>
+  const at = (onLedger, status = {}) =>
     currentRoundStep(
       input({
         address: 'ab'.repeat(32),
         connected: true,
+        ledger: ledger(onLedger),
         local: local(status),
         phase: PHASE.SETUP,
       }),
     ).id;
+  const reviewer = { reviewerIdHexes: ['bb'.repeat(32)] };
 
-  assert.equal(at({ isRegisteredReviewer: true }), 'enrollment');
-  assert.equal(at({ isRegisteredReviewer: true, enrolledOnChain: true }), 'receipt');
+  assert.equal(at(reviewer, { isRegisteredReviewer: true }), 'enrollment');
+  assert.equal(at({ ...reviewer, enrollmentLeafCount: 1 }), 'receipt');
   assert.equal(
-    at({ isRegisteredReviewer: true, enrolledOnChain: true, receiptImported: true }),
+    at({ ...reviewer, enrollmentLeafCount: 1 }, { enrolledOnChain: true, receiptImported: true }),
     'openApplications',
   );
+});
+
+test('offers the receipt once the leaf is on chain, before this browser knows it is its own', () => {
+  // The regression: this browser's leaf is only known after the receipt is
+  // imported, and importing is the next step. Waiting for it kept the round on
+  // the enrollment form forever. This is the status `toLocalStatus` reports
+  // right after enrolling, with no receipt imported yet.
+  const justEnrolled = input({
+    address: 'ab'.repeat(32),
+    connected: true,
+    ledger: setUp,
+    local: local({ enrolledOnChain: false, isRegisteredReviewer: true, receiptImported: false }),
+    phase: PHASE.SETUP,
+  });
+
+  assert.equal(currentRoundStep(justEnrolled).id, 'receipt');
+});
+
+test('counts steps another participant took, so a joining browser follows the round', () => {
+  // A browser that joined holds none of the organizer's or reviewer's secrets.
+  const joined = local({ isAdmin: false });
+  const at = (phase, onLedger) =>
+    input({
+      address: 'ab'.repeat(32),
+      connected: true,
+      ledger: onLedger,
+      local: joined,
+      phase,
+    });
+
+  assert.equal(currentRoundStep(at(PHASE.SETUP, setUp)).id, 'receipt');
+  assert.equal(currentRoundStep(at(PHASE.REVIEW, { ...setUp, tallies: [tally()] })).id, 'commit');
+  assert.equal(
+    unreachableRoundStep(at(PHASE.REVEAL, { ...setUp, nullifierCount: 1, tallies: [tally()] })),
+    null,
+  );
+  assert.equal(
+    currentRoundStep(at(PHASE.REVEAL, { ...setUp, nullifierCount: 1, tallies: [tally(1)] })),
+    null,
+  );
+});
+
+test('keeps a sealed score done across a reload, when this tab has no record of it', () => {
+  const reloaded = input({
+    address: 'ab'.repeat(32),
+    connected: true,
+    lastScore: null,
+    ledger: { ...setUp, nullifierCount: 1, tallies: [tally()] },
+    local: local({ enrolledOnChain: true, hasApplied: true, receiptImported: true }),
+    phase: PHASE.REVEAL,
+  });
+
+  assert.equal(unreachableRoundStep(reloaded), null);
+  assert.equal(currentRoundStep(reloaded).id, 'reveal');
 });
 
 test('moves through the round as the phase and this browser advance', () => {
@@ -81,6 +156,7 @@ test('moves through the round as the phase and this browser advance', () => {
       input({
         address: 'ab'.repeat(32),
         connected: true,
+        ledger: setUp,
         local: local({ ...ready, ...status }),
         phase,
         ...rest,
@@ -104,9 +180,9 @@ test('treats a committed score as done before the indexer catches up', () => {
     currentRoundStep(
       input({
         address: 'ab'.repeat(32),
-        commitmentHexes: [],
         connected: true,
         lastScore,
+        ledger: setUp,
         local: local({
           enrolledOnChain: true,
           hasApplied: true,
@@ -153,29 +229,42 @@ test('reports every step with its own done flag, in a stable order', () => {
 test('reports a round that can no longer be finished, naming the step that closed', () => {
   // Both rounds the hosted build left behind: no reviewer was registered and the
   // phase moved on, so registration can never happen and no score can follow.
-  const open = (phase, status = {}) =>
+  const open = (phase, onLedger = {}) =>
     unreachableRoundStep(
       input({
         address: 'ab'.repeat(32),
         connected: true,
-        local: local(status),
+        ledger: ledger(onLedger),
+        local: local(),
         phase,
       }),
     );
 
   assert.equal(open(PHASE.APPLY)?.id, 'register');
   assert.equal(open(PHASE.REVEAL)?.id, 'register');
-  assert.equal(open(PHASE.APPLY, { isRegisteredReviewer: true })?.id, 'enrollment');
+  assert.equal(open(PHASE.APPLY, { reviewerIdHexes: ['bb'.repeat(32)] })?.id, 'enrollment');
 });
 
 test('leaves a round alone while every deadline is still ahead of it', () => {
   const ready = { enrolledOnChain: true, isRegisteredReviewer: true, receiptImported: true };
   const at = (phase, status = {}) =>
     unreachableRoundStep(
-      input({ address: 'ab'.repeat(32), connected: true, local: local(status), phase }),
+      input({
+        address: 'ab'.repeat(32),
+        connected: true,
+        ledger: setUp,
+        local: local(status),
+        phase,
+      }),
     );
 
   assert.equal(at(PHASE.SETUP), null);
+  assert.equal(
+    unreachableRoundStep(
+      input({ address: 'ab'.repeat(32), connected: true, ledger: ledger(), phase: PHASE.SETUP }),
+    ),
+    null,
+  );
   assert.equal(at(PHASE.APPLY, ready), null);
   assert.equal(at(PHASE.REVIEW, { ...ready, hasApplied: true }), null);
   // Nothing is stranded before the ledger has been read.
@@ -195,6 +284,7 @@ test('strands scoring when reveal opens with no sealed score', () => {
       input({
         address: 'ab'.repeat(32),
         connected: true,
+        ledger: { ...setUp, tallies: [tally()] },
         local: local(ready),
         phase: PHASE.REVEAL,
       }),

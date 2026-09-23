@@ -7,13 +7,16 @@
 // the interface simply let a required step be skipped.
 //
 // So the flow is derived rather than laid out: each step reports whether it is
-// already done from the public ledger and this browser's own state, and the one
-// on screen is the first that is not. A step cannot be reached before the ones
+// already done, and the one on screen is the first that is not. The public
+// ledger decides first, because every browser in the round reads the same
+// ledger while each holds only its own secrets: a step another participant took
+// is done here too. This browser's own state only covers what the indexer has
+// not caught up with yet, or what never reaches the ledger at all. A step cannot be reached before the ones
 // it depends on, because those are what mark it reachable.
 
 import type { LastScore } from './privacy-view.js';
 import { PHASE } from './round-actions.js';
-import type { LocalStatus } from './round-format.js';
+import type { LocalStatus, RoundView } from './round-format.js';
 
 export type RoundStepId =
   | 'apply'
@@ -33,8 +36,11 @@ export type RoundStepInput = {
   readonly connected: boolean;
   /** The contract this browser holds secrets for, or null before a round opens. */
   readonly address: string | null;
-  /** Commitments currently sealed on chain; reveal removes one. */
-  readonly commitmentHexes: readonly string[];
+  /** What the public ledger shows, or null before it has been read. */
+  readonly ledger: Pick<
+    RoundView,
+    'enrollmentLeafCount' | 'nullifierCount' | 'reviewerIdHexes' | 'tallies'
+  > | null;
   readonly lastScore: LastScore | null;
   readonly local: LocalStatus | null;
   readonly phase: number | null;
@@ -84,21 +90,27 @@ const DEFINITIONS: readonly StepDefinition[] = [
     closesAfter: PHASE.SETUP,
     title: 'Register the reviewer',
     summary: 'Only registered pseudonyms can seal a score, and only setup can register them.',
-    isDone: ({ local }) => local?.isRegisteredReviewer === true,
+    isDone: ({ ledger, local }) =>
+      (ledger?.reviewerIdHexes.length ?? 0) > 0 || local?.isRegisteredReviewer === true,
   },
   {
     id: 'enrollment',
     closesAfter: PHASE.SETUP,
     title: 'Enroll an applicant',
     summary: 'The figures you verified go into a commitment and a private receipt, never on chain.',
-    isDone: ({ local }) => local?.enrolledOnChain === true,
+    // Not this browser's own leaf: that is only known once the receipt is
+    // imported, which is the next step, so waiting for it would never end.
+    isDone: ({ ledger, local }) =>
+      (ledger?.enrollmentLeafCount ?? 0) > 0 || local?.enrolledOnChain === true,
   },
   {
     id: 'receipt',
     closesAfter: PHASE.APPLY,
     title: 'Import the receipt',
     summary: 'The applicant needs the receipt before they can prove they clear the rules.',
-    isDone: ({ local }) => local?.receiptImported === true,
+    // A receipt never reaches the ledger, but an application needs one.
+    isDone: ({ ledger, local }) =>
+      local?.receiptImported === true || (ledger?.tallies.length ?? 0) > 0,
   },
   {
     id: 'openApplications',
@@ -111,7 +123,7 @@ const DEFINITIONS: readonly StepDefinition[] = [
     closesAfter: PHASE.APPLY,
     title: 'Submit the application',
     summary: 'The proof shows the rules are met. The ledger gets a pseudonym and nothing else.',
-    isDone: ({ local }) => local?.hasApplied === true,
+    isDone: ({ ledger, local }) => (ledger?.tallies.length ?? 0) > 0 || local?.hasApplied === true,
   },
   {
     id: 'openReview',
@@ -125,8 +137,9 @@ const DEFINITIONS: readonly StepDefinition[] = [
     title: 'Seal a score',
     summary: 'The commitment goes public. The score stays in this browser.',
     // A commit that has been made is known here before the indexer catches up,
-    // and a revealed score was committed first.
-    isDone: ({ lastScore }) => lastScore !== null,
+    // and a revealed score was committed first. The nullifier outlives both a
+    // reload and the reveal, which removes the commitment itself.
+    isDone: ({ lastScore, ledger }) => lastScore !== null || (ledger?.nullifierCount ?? 0) > 0,
   },
   {
     id: 'openReveal',
@@ -138,7 +151,9 @@ const DEFINITIONS: readonly StepDefinition[] = [
     id: 'reveal',
     title: 'Open the sealed score',
     summary: 'The tally moves to match the score anyone can now recompute.',
-    isDone: ({ lastScore }) => lastScore?.stage === 'revealed',
+    isDone: ({ lastScore, ledger }) =>
+      lastScore?.stage === 'revealed' ||
+      (ledger?.tallies.some(({ revealedCount }) => (revealedCount ?? 0) > 0) ?? false),
   },
 ];
 

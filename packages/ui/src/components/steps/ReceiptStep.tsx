@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { AequiraRound } from '../../hooks/useAequiraRound.js';
 import { actionAvailability } from '../../round-actions.js';
 import { ActionButton } from '../ActionButton.js';
+import { CopyButton } from '../CopyButton.js';
 
 type ReceiptStepProps = {
   readonly round: AequiraRound;
@@ -28,6 +29,7 @@ export const ReceiptStep = ({ round }: ReceiptStepProps) => {
             would pass it out of band and paste it below.
           </p>
           <div className="button-row">
+            <CopyButton label="enrollment receipt" value={issued} />
             <button
               className="button button-primary"
               disabled={round.busy !== null}
