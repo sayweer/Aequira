@@ -443,6 +443,9 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
         'importReceipt',
         (session) => importEnrollmentReceipt(session, receiptText),
         async (_result, session) => {
+          // Handed over: the receipt holds the figures and the salt, so the
+          // copy this browser issued is not kept once it has been imported.
+          setIssuedReceipt((current) => (current === receiptText ? null : current));
           await loadIdentity(session);
         },
       ),
