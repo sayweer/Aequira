@@ -139,7 +139,7 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
   const attemptRef = useRef(0);
   // Render-time `busy` lags a fast second click; this does not.
   const busyRef = useRef(false);
-  const refreshInFlightRef = useRef(false);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshQueuedRef = useRef(false);
   const ledgerFailuresRef = useRef(0);
 
@@ -174,44 +174,50 @@ export const useAequiraRound = (connectedApi: ConnectedAPI | null): AequiraRound
 
   // One read at a time, so a slow response can never overwrite a newer one. A
   // refresh requested mid-read (say, right after a phase change) runs once more
-  // afterwards instead of being dropped until the next poll.
-  const refresh = useCallback(async () => {
-    if (refreshInFlightRef.current) {
+  // afterwards instead of being dropped until the next poll, and its caller
+  // waits for that read: a call that just landed must not hand its button back
+  // while the screen still shows the ledger from before it.
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlightRef.current !== null) {
       refreshQueuedRef.current = true;
-      return;
+      return refreshInFlightRef.current;
     }
 
-    refreshInFlightRef.current = true;
+    // Deferred so the ref is set before the loop can finish and clear it.
+    const read = Promise.resolve()
+      .then(async () => {
+        do {
+          refreshQueuedRef.current = false;
+          const session = sessionRef.current;
 
-    try {
-      do {
-        refreshQueuedRef.current = false;
-        const session = sessionRef.current;
-
-        if (session === null) {
-          break;
-        }
-
-        try {
-          const nextView = await readRoundState(session, identityRef.current);
-
-          // A read that outlived its round must not repaint the next one.
-          if (sessionRef.current === session) {
-            ledgerFailuresRef.current = 0;
-            setIndexerLagging(false);
-            setView(nextView);
+          if (session === null) {
+            break;
           }
-        } catch {
-          // The indexer lags behind a fresh deployment; the poll retries.
-          if (sessionRef.current === session) {
-            ledgerFailuresRef.current += 1;
-            setIndexerLagging(ledgerFailuresRef.current >= LEDGER_FAILURES_BEFORE_LAG);
+
+          try {
+            const nextView = await readRoundState(session, identityRef.current);
+
+            // A read that outlived its round must not repaint the next one.
+            if (sessionRef.current === session) {
+              ledgerFailuresRef.current = 0;
+              setIndexerLagging(false);
+              setView(nextView);
+            }
+          } catch {
+            // The indexer lags behind a fresh deployment; the poll retries.
+            if (sessionRef.current === session) {
+              ledgerFailuresRef.current += 1;
+              setIndexerLagging(ledgerFailuresRef.current >= LEDGER_FAILURES_BEFORE_LAG);
+            }
           }
-        }
-      } while (refreshQueuedRef.current);
-    } finally {
-      refreshInFlightRef.current = false;
-    }
+        } while (refreshQueuedRef.current);
+      })
+      .finally(() => {
+        refreshInFlightRef.current = null;
+      });
+    refreshInFlightRef.current = read;
+
+    return read;
   }, []);
 
   useEffect(() => {
