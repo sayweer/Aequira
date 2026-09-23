@@ -169,6 +169,26 @@ describe('AEQUIRA CLI configuration', () => {
     );
   });
 
+  test('treats a blank setting as unset instead of as the working directory', () => {
+    const defaults = loadCliConfig({ environment: {} });
+    const blank = loadCliConfig({
+      environment: {
+        AEQUIRA_NETWORK: '',
+        AEQUIRA_PRIVATE_STATE_DIR: '  ',
+        AEQUIRA_PROOF_SERVER_URL: '',
+      },
+    });
+
+    assert.equal(blank.privateStateDirectory, defaults.privateStateDirectory);
+    assert.notEqual(blank.privateStateDirectory, process.cwd());
+    assert.equal(blank.network, defaults.network);
+    assert.equal(blank.proofServer, defaults.proofServer);
+    assert.throws(
+      () => loadCliConfig({ environment: { AEQUIRA_PROOF_SERVER_URL: 'not a url' } }),
+      /proof server URL must be a valid URL/,
+    );
+  });
+
   test('rejects unsupported networks and credential-bearing URLs', () => {
     assert.throws(
       () => loadCliConfig({ environment: {}, network: 'mainnet' }),

@@ -56,6 +56,12 @@ export type CliEnvironment = Readonly<
   >
 >;
 
+// A blank entry, such as `AEQUIRA_PRIVATE_STATE_DIR=` in a shell or a `.env`
+// file, means unset. Taken literally, an empty directory resolves to the
+// working directory, which would put the wallet vault and backups in the repo.
+const setting = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === '' ? undefined : value;
+
 const isAequiraNetwork = (value: string): value is AequiraNetwork =>
   NETWORKS.some((network) => network === value);
 
@@ -71,7 +77,13 @@ const parseNetwork = (value: string | undefined): AequiraNetwork => {
 };
 
 const parseHttpUrl = (name: string, value: string): string => {
-  const url = new URL(value);
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
 
   if (!['http:', 'https:'].includes(url.protocol)) {
     throw new Error(`${name} must use http or https`);
@@ -102,17 +114,17 @@ export type LoadCliConfigOptions = {
 
 export const loadCliConfig = (options: LoadCliConfigOptions = {}): CliConfig => {
   const environment = options.environment ?? process.env;
-  const network = parseNetwork(options.network ?? environment.AEQUIRA_NETWORK);
+  const network = parseNetwork(options.network ?? setting(environment.AEQUIRA_NETWORK));
   const endpoints = NETWORK_ENDPOINTS[network];
 
   return {
     ...endpoints,
     privateStateDirectory: parsePrivateStateDirectory(
-      environment.AEQUIRA_PRIVATE_STATE_DIR ?? DEFAULT_PRIVATE_STATE_DIRECTORY,
+      setting(environment.AEQUIRA_PRIVATE_STATE_DIR) ?? DEFAULT_PRIVATE_STATE_DIRECTORY,
     ),
     proofServer: parseHttpUrl(
       'proof server URL',
-      options.proofServer ?? environment.AEQUIRA_PROOF_SERVER_URL ?? DEFAULT_PROOF_SERVER,
+      options.proofServer ?? setting(environment.AEQUIRA_PROOF_SERVER_URL) ?? DEFAULT_PROOF_SERVER,
     ),
     zkConfigPath: DEFAULT_ZK_CONFIG_PATH,
   };
