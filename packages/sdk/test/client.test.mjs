@@ -339,16 +339,15 @@ describe('AEQUIRA SDK public value derivation', () => {
 
   test('derives a nullifier that does not depend on the score', () => {
     // The nullifier must be stable across scores, otherwise a reviewer could
-    // commit twice by changing the value.
-    const commitment = deriveScoreCommitment(
-      roundId,
-      applicationId,
-      50n,
-      reviewerSecret,
-      scoreSalt,
-    );
+    // commit twice by changing the value. The nullifier takes no score at
+    // all, so the proof is that two different scores share it.
+    const nullifier = deriveScoreNullifier(roundId, applicationId, reviewerSecret);
+    const low = deriveScoreCommitment(roundId, applicationId, 50n, reviewerSecret, scoreSalt);
+    const high = deriveScoreCommitment(roundId, applicationId, 51n, reviewerSecret, scoreSalt);
 
-    assert.notDeepEqual(commitment, deriveScoreNullifier(roundId, applicationId, reviewerSecret));
+    assert.notDeepEqual(low, high);
+    assert.notDeepEqual(low, nullifier);
+    assert.notDeepEqual(high, nullifier);
   });
 
   test('derives a commitment that changes with the score and with the salt', () => {
@@ -386,7 +385,6 @@ describe('AEQUIRA SDK public value derivation', () => {
 
     assert.notDeepEqual(commitment, scoreSalt);
     assert.notDeepEqual(commitment, reviewerSecret);
-    assert.ok(!commitment.includes(93));
   });
 
   test('rejects malformed derivation inputs', () => {
@@ -401,6 +399,19 @@ describe('AEQUIRA SDK public value derivation', () => {
     assert.throws(
       () => deriveScoreCommitment(roundId, applicationId, 101n, reviewerSecret, scoreSalt),
       /score must be between 0 and 100/,
+    );
+  });
+
+  test('rejects a plain number before the runtime can quote it in an error', () => {
+    // The Compact runtime's type error names the value it received, so a
+    // private score must be refused here, where the message carries no value.
+    assert.throws(
+      () => deriveScoreCommitment(roundId, applicationId, 93, reviewerSecret, scoreSalt),
+      (error) => /score must be a bigint/.test(error.message) && !error.message.includes('93'),
+    );
+    assert.throws(
+      () => deriveEnrollmentLeaf(2, 350n, 7n, filled(5), filled(6)),
+      /incomeBand must be a bigint/,
     );
   });
 });

@@ -32,6 +32,11 @@ const assertBytes32 = (name: string, value: Uint8Array): void => {
 };
 
 const assertUintRange = (name: string, value: bigint, maximum: bigint): void => {
+  // Checked at runtime because a plain number would otherwise reach the Compact
+  // runtime, whose type error quotes the private value it rejected.
+  if (typeof value !== 'bigint') {
+    throw new TypeError(`${name} must be a bigint`);
+  }
   if (value < 0n || value > maximum) {
     throw new RangeError(`${name} must be between 0 and ${maximum}`);
   }
@@ -44,9 +49,7 @@ export const validateAequiraPrivateState = (privateState: AequiraPrivateState): 
   assertBytes32('applicantSecret', privateState.applicantSecret);
   assertBytes32('applicantSalt', privateState.applicantSalt);
 
-  if (privateState.score < 0n || privateState.score > 100n) {
-    throw new RangeError('score must be between 0 and 100');
-  }
+  assertUintRange('score', privateState.score, 100n);
 
   // The circuit's own witness types are Uint<8>, Uint<16> and Uint<8>. Catching
   // an out-of-range attribute here fails the call before a proof is attempted.
@@ -97,9 +100,7 @@ export const deriveScoreCommitment = (
   assertBytes32('reviewerSecret', reviewerSecret);
   assertBytes32('scoreSalt', scoreSalt);
 
-  if (score < 0n || score > 100n) {
-    throw new RangeError('score must be between 0 and 100');
-  }
+  assertUintRange('score', score, 100n);
 
   return Uint8Array.from(
     pureCircuits.scoreCommitment(roundId, applicationId, score, reviewerSecret, scoreSalt),
@@ -353,6 +354,7 @@ export const issueEnrollmentReceipt = (
   issue: EnrollmentIssue,
 ): { readonly enrollmentLeaf: Uint8Array; readonly receipt: string } => {
   assertBytes32('roundId', issue.roundId);
+  assertBytes32('salt', issue.salt);
 
   if (isAllZero(issue.salt)) {
     throw new RangeError('salt must not be all zeros');
