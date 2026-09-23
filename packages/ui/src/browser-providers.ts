@@ -111,15 +111,17 @@ export const createBrowserProviderSession = async (
         privateStoragePasswordProvider: () => passwordHolder.value,
       }) as EncryptedBrowserPrivateStateProvider,
   );
-  const proofMode = selectProofMode({
-    configuredUrl: import.meta.env.VITE_PROOF_SERVER_URL,
-    hasProvingProvider: supportsWalletProving(connectedApi),
-    isDev: import.meta.env.DEV,
-    origin: window.location.origin,
-    walletProverUri: configuration.proverServerUri,
-  });
 
   try {
+    // Inside the try: a remote prover is refused here, and the password must
+    // still be cleared when it is.
+    const proofMode = selectProofMode({
+      configuredUrl: import.meta.env.VITE_PROOF_SERVER_URL,
+      hasProvingProvider: supportsWalletProving(connectedApi),
+      isDev: import.meta.env.DEV,
+      origin: window.location.origin,
+      walletProverUri: configuration.proverServerUri,
+    });
     const providers = await withDeploymentStage('provider-configuration', async () => {
       const initializedZkConfigProvider = new FetchZkConfigProvider<AequiraCircuitKey>(
         window.location.origin,

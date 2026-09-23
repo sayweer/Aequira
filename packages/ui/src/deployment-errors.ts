@@ -99,6 +99,11 @@ const hasWalletFailureTag = (error: unknown, tag: string): boolean =>
 const WALLET_PROVING_MESSAGE =
   'Lace could not prove its fee payment. Lace sends that proof to the proof server chosen in Settings → Midnight → Proof Server; if it is Local, start it with pnpm proof-server:up and retry.';
 
+// Not an unreachable prover: a reachable one this page refuses to send the
+// witness to, which starting a local server does not fix on its own.
+const REMOTE_PROVER_MESSAGE =
+  'The proof server Lace reports is not on this machine, and AEQUIRA will not send it the private witness. Point Lace at a local proof server and retry.';
+
 // A refused connection and an unreachable host look identical from here: both
 // arrive as a fetch failure with no host in the text. These let the mappers say
 // which one happened instead of always blaming the proof server.
@@ -203,6 +208,9 @@ export const toDeploymentErrorMessage = (
   }
   if (stage === 'transaction-submission') {
     return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
+  }
+  if (message.includes('local loopback address')) {
+    return REMOTE_PROVER_MESSAGE;
   }
   if (message.includes('proof server') || message.includes('prover')) {
     return 'The local proof server could not be reached. Start it and retry the deployment.';
@@ -371,6 +379,9 @@ export const toCircuitErrorMessage = (
   }
   if (stage === 'transaction-submission') {
     return 'Lace could not submit the balanced Preprod transaction. Keep the wallet unlocked and retry.';
+  }
+  if (message.includes('local loopback address')) {
+    return REMOTE_PROVER_MESSAGE;
   }
   if (message.includes('proof server') || message.includes('prover')) {
     return 'The prover could not be reached. Confirm the proof server is running and retry.';

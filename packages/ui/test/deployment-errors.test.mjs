@@ -7,6 +7,7 @@ import {
   toCircuitErrorMessage,
   toDeploymentErrorMessage,
 } from '../.test-build/deployment-errors.js';
+import { normalizeLocalProofServerUrl } from '../.test-build/provider-security.js';
 
 test('accepts matching local storage passwords that satisfy the shared policy', () => {
   const password = 'Str0ng!LocalVault#2026';
@@ -146,6 +147,21 @@ test('reports the new circuit stages without exposing their causes', () => {
 
     assert.match(message, expected);
     assert.doesNotMatch(message, /hidden-score-93/);
+  }
+});
+
+test('says a remote prover was refused rather than that it could not be reached', () => {
+  let refusal;
+
+  try {
+    normalizeLocalProofServerUrl('https://prover.example.com');
+  } catch (error) {
+    refusal = error;
+  }
+
+  for (const message of [toDeploymentErrorMessage(refusal), toCircuitErrorMessage(refusal)]) {
+    assert.match(message, /not on this machine/);
+    assert.doesNotMatch(message, /could not be reached/);
   }
 });
 
