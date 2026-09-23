@@ -59,17 +59,17 @@ provider. That smoke-test transaction was not balanced, funded, or submitted.
 
 The contract has since been deployed to Preprod for real, from the browser app
 through Lace. The current deployment is
-`6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272`, deploy
+`c9fafcb41e78f4c2f8c3ce5b1404aa0fc0a0e5fc5af10519a212ea35136edd3f`, deploy
 transaction
-`e47dab524fa170c87ce1610bdc9153991668e596c6ffd4791944f9d4ccd9d8d3` in block
-`2592893`, which the official Preprod indexer returns as a `ContractDeploy`.
+`8acff3da9b134cc54cf69fd95fdbbf9a356e5ecb0f881b4f19f12f3092e2dea4` in block
+`2671477`, which the official Preprod indexer returns as a `ContractDeploy`.
 
 Its dependency installation reported 16 transitive vulnerabilities. AEQUIRA
 does not copy the example's lockfile or full dependency graph; dependencies will
 be added narrowly and audited when each workspace needs them.
 
 The AEQUIRA contract compiles 8 state-changing circuits. The repository now
-passes 238 tracked `node:test` tests: 26 contract, 37 SDK, 113 browser, and 62
+passes 253 tracked `node:test` tests: 30 contract, 38 SDK, 120 browser, and 65
 CLI/runtime tests. Tests and the generated `managed/` output are tracked in Git and
 run in CI.
 The CLI tests include encrypted-at-rest private-state checks, wrong-password

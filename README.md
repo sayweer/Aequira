@@ -9,11 +9,11 @@ and the tally is publicly verifiable once it is opened.
 |                      |                                                                                                                                                                                         |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Live demo**        | https://aequira-ui-rho.vercel.app                                                                                                                                                       |
-| **Demo video**       | `TODO_DEMO_VIDEO_URL`                                                                                                                                                                   |
-| **Preprod contract** | [`6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272`](https://preprod.midnightexplorer.com/contracts/0x6c3ae6b59692c2a8e4a454a8cdccd21084ed665b01766c993c15244c42485272) |
+| **Demo video**       | https://youtu.be/SEe_1GOzlVg                                                                                                                                                            |
+| **Preprod contract** | [`c9fafcb41e78f4c2f8c3ce5b1404aa0fc0a0e5fc5af10519a212ea35136edd3f`](https://preprod.midnightexplorer.com/contracts/0xc9fafcb41e78f4c2f8c3ce5b1404aa0fc0a0e5fc5af10519a212ea35136edd3f) |
 | **Network**          | Midnight Preprod                                                                                                                                                                        |
 | **Circuits**         | 8 (`registerReviewer`, `registerApplicant`, `openApplications`, `apply`, `openReview`, `openReveal`, `commitScore`, `revealScore`)                                                      |
-| **Tests**            | 238 (`pnpm test`)                                                                                                                                                                       |
+| **Tests**            | 253 (`pnpm test`)                                                                                                                                                                       |
 
 Short on time? [Verify this in five minutes](#verify-this-in-five-minutes) needs no
 wallet, no Docker and no funded account.
@@ -229,7 +229,7 @@ pnpm `11.9.0` are enough, because the generated circuit output is tracked in Git
 
 ```bash
 pnpm install
-pnpm test            # 238 tests: 26 contract, 37 sdk, 113 ui, 62 cli
+pnpm test            # 253 tests: 30 contract, 38 sdk, 120 ui, 65 cli
 ```
 
 With Compact devtools `0.5.1` installed, `pnpm compact:build` recompiles the contract
@@ -266,7 +266,7 @@ Preprod with tDUST available.
 ```bash
 pnpm install
 pnpm compact:build          # compile the contract to circuits and keys
-pnpm test                   # 238 tests, no proof server needed
+pnpm test                   # 253 tests, no proof server needed
 pnpm proof-server:up        # only if Lace does not prove for you, see below
 pnpm --filter @aequira/ui dev
 ```
@@ -433,7 +433,7 @@ application with its tally. It is how a reviewer finds an application ID.
 
 ## Demo video
 
-`TODO_DEMO_VIDEO_URL`
+https://youtu.be/SEe_1GOzlVg
 
 The recording walks one round end to end: Lace connect on Preprod → deploy → register
 the reviewer pseudonym → commit a sealed score with the disclosure panel in frame →
@@ -469,8 +469,8 @@ CI runs the Compact compile and this suite on every push, as two independent job
 | ------------------------------------------ | -------------------------------------------------------------------------------- |
 | Contract compiles via `compact compile`    | `pnpm compact:build`; CI `compact` job                                           |
 | Generated `managed/` present               | [`packages/contract/src/managed/`](packages/contract/src/managed) — 32 ZK assets |
-| Passing test suite                         | 238 tests, `pnpm test`; CI `verify` job                                          |
-| Deployed to Preprod with a visible address | table at the top of this file; `ContractDeploy` in block 2592893                 |
+| Passing test suite                         | 253 tests, `pnpm test`; CI `verify` job                                          |
+| Deployed to Preprod with a visible address | table at the top of this file; `ContractDeploy` in block 2671477                 |
 | Public state vs private witness explained  | [Public state vs private witness](#public-state-vs-private-witness)              |
 | Initial product idea                       | [Initial product idea](#initial-product-idea)                                    |
 | Meaningful commit history                  | `git log --oneline` — well past the 5-commit minimum                             |
@@ -489,7 +489,7 @@ CI runs the Compact compile and this suite on every push, as two independent job
 
 | Requirement                          | Where                                                                |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Minimum 3 tests passing              | 238                                                                  |
+| Minimum 3 tests passing              | 253                                                                  |
 | CI/CD pipeline                       | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) + badge above |
 | Approved idea from the provided list | [Chosen problem: Private Voting](#chosen-problem-private-voting)     |
 | Privacy model section                | [Privacy model](#privacy-model)                                      |
