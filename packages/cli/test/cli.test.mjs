@@ -213,6 +213,24 @@ describe('AEQUIRA CLI configuration', () => {
     );
   });
 
+  test('refuses an option given twice instead of letting the last one win', () => {
+    assert.throws(
+      () =>
+        parseCliArguments([
+          'deploy',
+          '--round-id',
+          'aa'.repeat(32),
+          '--max-income-band',
+          '3',
+          '--min-gpa-scaled',
+          '300',
+          '--round-id',
+          'bb'.repeat(32),
+        ]),
+      /--round-id was given more than once/,
+    );
+  });
+
   test('forbids secrets in process arguments', () => {
     assert.throws(
       () => parseCliArguments(['doctor', '--wallet-seed', 'secret']),

@@ -92,6 +92,7 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
   let proofServer: string | undefined;
   let reviewerId: string | undefined;
   let roundId: string | undefined;
+  const seenOptions = new Set<string>();
 
   for (let index = 0; index < options.length; index += 1) {
     const option = options[index];
@@ -106,6 +107,14 @@ export const parseCliArguments = (argv: readonly string[]): CliArguments => {
         `${/^--[a-z][a-z0-9-]*$/.test(optionName) ? optionName : `The argument at position ${index + 2}`} is forbidden: secrets must never be passed through command-line arguments`,
       );
     }
+
+    // A repeated option would otherwise let the last value win silently, and a
+    // deploy cannot be undone. Only a recognized option can have been seen, so
+    // the name echoed here is never unrecognized input.
+    if (seenOptions.has(option)) {
+      throw new Error(`${option} was given more than once`);
+    }
+    seenOptions.add(option);
 
     if (option === '--json') {
       json = true;
