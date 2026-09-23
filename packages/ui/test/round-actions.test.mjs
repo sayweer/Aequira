@@ -124,7 +124,11 @@ test('says nothing can open a score this browser never sealed', () => {
   // The state the hosted round reached: nobody was registered as a reviewer, so
   // the round advanced to reveal with no commitment on chain and every score
   // was refused. Reporting a wrong score there is a dead end.
-  const message = revealRejection({ hasSealedScore: false, scoreOpensCommitment: false });
+  const message = revealRejection({
+    commitmentRemains: false,
+    hasSealedScore: false,
+    scoreOpensCommitment: false,
+  });
 
   assert.match(message, /no sealed score/);
   assert.match(message, /no score will work/);
@@ -134,10 +138,26 @@ test('says nothing can open a score this browser never sealed', () => {
 
 test('keeps the wrong-score message for a score that really is wrong', () => {
   assert.match(
-    revealRejection({ hasSealedScore: true, scoreOpensCommitment: false }),
+    revealRejection({ commitmentRemains: true, hasSealedScore: true, scoreOpensCommitment: false }),
     /does not open the commitment recorded on chain/,
   );
-  assert.equal(revealRejection({ hasSealedScore: true, scoreOpensCommitment: true }), null);
+  assert.equal(
+    revealRejection({ commitmentRemains: true, hasSealedScore: true, scoreOpensCommitment: true }),
+    null,
+  );
+});
+
+test('says a score was already opened rather than that it is wrong', () => {
+  // Reveal removes the commitment and leaves the nullifier, so a second
+  // attempt used to be reported as a wrong score, whatever score was tried.
+  const message = revealRejection({
+    commitmentRemains: false,
+    hasSealedScore: true,
+    scoreOpensCommitment: false,
+  });
+
+  assert.match(message, /already been opened/);
+  assert.doesNotMatch(message, /does not open the commitment/);
 });
 
 test('does not offer reveal to a browser that is not on the reviewer roster', () => {

@@ -49,6 +49,7 @@ import {
 } from './round-format.js';
 import {
   InputError,
+  MAX_SCORE,
   parseApplicantAttributes,
   parseApplicantId,
   parseApplicationId,
@@ -66,6 +67,9 @@ export type RoundSession = {
   readonly roundId: Uint8Array;
   close(): Promise<void>;
 };
+
+/** Every score the rubric allows, to recognize a commitment without its score. */
+const RUBRIC_SCORES = Array.from({ length: MAX_SCORE + 1 }, (_, score) => BigInt(score));
 
 export type ScoreInput = {
   readonly applicationIdHex: string;
@@ -410,10 +414,26 @@ export const commitScore = async (session: RoundSession, input: ScoreInput): Pro
 export const revealScore = async (session: RoundSession, input: ScoreInput): Promise<Opening> => {
   const { opening, privateState } = await buildOpening(session, input);
   const ledger = await readLedger(session);
+  const applicationId = hexToBytes(opening.applicationIdHex);
+  const scoreOpensCommitment = ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex));
 
   const rejection = revealRejection({
+    // Only worth the local hashes when the score given opens nothing.
+    commitmentRemains:
+      scoreOpensCommitment ||
+      RUBRIC_SCORES.some((score) =>
+        ledger.scoreCommitments.member(
+          deriveScoreCommitment(
+            session.roundId,
+            applicationId,
+            score,
+            privateState.reviewerSecret,
+            privateState.scoreSalt,
+          ),
+        ),
+      ),
     hasSealedScore: ledger.scoreNullifiers.member(hexToBytes(opening.nullifierHex)),
-    scoreOpensCommitment: ledger.scoreCommitments.member(hexToBytes(opening.commitmentHex)),
+    scoreOpensCommitment,
   });
 
   if (rejection !== null) {

@@ -155,14 +155,23 @@ export const actionAvailability = (
  * number in the rubric, which is exactly what happened once.
  */
 export const revealRejection = ({
+  commitmentRemains,
   hasSealedScore,
   scoreOpensCommitment,
 }: {
+  /** Whether any rubric score opens a commitment still on chain for this reviewer. */
+  readonly commitmentRemains: boolean;
   readonly hasSealedScore: boolean;
   readonly scoreOpensCommitment: boolean;
 }): string | null => {
   if (!hasSealedScore) {
     return 'This browser has no sealed score for that application, so there is nothing to open and no score will work. A reviewer has to be registered while the round is in setup, then commit during review.';
+  }
+  // A reveal removes the commitment but the nullifier stays, so a score opened
+  // once looks sealed by the nullifier alone. Calling that a wrong score sends
+  // the reviewer through the rubric again, which is the same dead end.
+  if (!commitmentRemains) {
+    return 'The score this browser sealed for that application has already been opened into the tally, so there is nothing left to open.';
   }
   if (!scoreOpensCommitment) {
     return 'That score does not open the commitment recorded on chain for this application.';
