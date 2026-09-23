@@ -1762,19 +1762,24 @@ describe('AEQUIRA CLI applicant commands', () => {
         }),
         createRuntime: async () => runtime,
         readLedger: async () => ledgerFixture({ roundId, phase: 1 }),
-        joinContract: async () => ({
-          callTx: {
-            apply: async () => {
-              calls.push('must-not-submit');
-              return { public: finalizedPublicData };
+        joinContract: async () => {
+          // A join stores a signing key, which would make `restore` refuse
+          // this round later, so it must not happen without private state.
+          calls.push('join');
+          return {
+            callTx: {
+              apply: async () => {
+                calls.push('must-not-submit');
+                return { public: finalizedPublicData };
+              },
             },
-          },
-        }),
+          };
+        },
       }),
       /run join before submitting a contract call/,
     );
-    assert.equal(calls.includes('must-not-submit'), false);
-    assert.equal(calls.at(-1), 'close');
+    // Refused before the wallet syncs or the round is joined.
+    assert.deepEqual(calls, ['close']);
   });
 });
 
@@ -1945,19 +1950,24 @@ describe('AEQUIRA CLI score commands', () => {
         promptSecret: async () => '87',
         createRuntime: async () => runtime,
         readLedger: async () => ledgerFixture({ roundId, phase: 3 }),
-        joinContract: async () => ({
-          callTx: {
-            revealScore: async () => {
-              calls.push('must-not-submit');
-              return { public: finalizedPublicData };
+        joinContract: async () => {
+          // A join stores a signing key, which would make `restore` refuse
+          // this round later, so it must not happen without private state.
+          calls.push('join');
+          return {
+            callTx: {
+              revealScore: async () => {
+                calls.push('must-not-submit');
+                return { public: finalizedPublicData };
+              },
             },
-          },
-        }),
+          };
+        },
       }),
       /run join before submitting a contract call/,
     );
-    assert.equal(calls.includes('must-not-submit'), false);
-    assert.equal(calls.at(-1), 'close');
+    // Refused before the wallet syncs or the round is joined.
+    assert.deepEqual(calls, ['close']);
   });
 
   test('preserves finalized call identity when backup creation fails', async () => {

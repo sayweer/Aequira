@@ -795,6 +795,10 @@ const runExistingPrivateStateCall = async (
       privateStatePassword: secrets.privateStatePassword,
       walletSeed: secrets.walletSeed,
     });
+    // Read before joining: a join stores a fresh signing key for a contract it
+    // has none for, and that orphan key would later make `restore` refuse the
+    // round. Reading first also spares a wallet sync that could not be used.
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     await runtime.wallet.start();
     await assertWalletHasDust(runtime.wallet);
 
@@ -803,7 +807,6 @@ const runExistingPrivateStateCall = async (
       contractAddress,
       dependencies.joinContract ?? joinAequira,
     );
-    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const txData = await submitCall(contract);
     const backupPath = await writeFinalizedCallBackup(
       secrets.privateStatePassword,
@@ -881,6 +884,10 @@ const runScoreOpeningCall = async (
       privateStatePassword: secrets.privateStatePassword,
       walletSeed: secrets.walletSeed,
     });
+    // Read before joining: a join stores a fresh signing key for a contract it
+    // has none for, and that orphan key would later make `restore` refuse the
+    // round. Reading first also spares a wallet sync that could not be used.
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     await runtime.wallet.start();
     await assertWalletHasDust(runtime.wallet);
 
@@ -889,7 +896,6 @@ const runScoreOpeningCall = async (
       contractAddress,
       dependencies.joinContract ?? joinAequira,
     );
-    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const reviewerSecret = Uint8Array.from(currentPrivateState.reviewerSecret);
     const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
       runtime.providers,
@@ -1063,6 +1069,10 @@ export const runRegisterApplicantCommand = async (
       privateStatePassword: secrets.privateStatePassword,
       walletSeed: secrets.walletSeed,
     });
+    // Read before joining: a join stores a fresh signing key for a contract it
+    // has none for, and that orphan key would later make `restore` refuse the
+    // round. Reading first also spares a wallet sync that could not be used.
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     await runtime.wallet.start();
     await assertWalletHasDust(runtime.wallet);
 
@@ -1071,7 +1081,6 @@ export const runRegisterApplicantCommand = async (
       contractAddress,
       dependencies.joinContract ?? joinAequira,
     );
-    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     const ledgerState = await (dependencies.readLedger ?? readRoundLedger)(
       runtime.providers,
       contractAddress,
@@ -1242,6 +1251,10 @@ export const runApplyCommand = async (
       privateStatePassword: secrets.privateStatePassword,
       walletSeed: secrets.walletSeed,
     });
+    // Read before joining: a join stores a fresh signing key for a contract it
+    // has none for, and that orphan key would later make `restore` refuse the
+    // round. Reading first also spares a wallet sync that could not be used.
+    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
     await runtime.wallet.start();
     await assertWalletHasDust(runtime.wallet);
 
@@ -1250,7 +1263,6 @@ export const runApplyCommand = async (
       contractAddress,
       dependencies.joinContract ?? joinAequira,
     );
-    currentPrivateState = await readExistingPrivateState(runtime, contractAddress);
 
     if (!hasImportedEnrollment(currentPrivateState)) {
       throw new Error(
