@@ -7,6 +7,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
+import { SigningKeyExportError } from '@midnight-ntwrk/midnight-js-types';
 import { validatePassword } from '@midnight-ntwrk/midnight-js-utils';
 
 import type { CliConfig } from './config.js';
@@ -58,7 +59,41 @@ export class EncryptedPrivateStateStore {
       privateStoragePasswordProvider: () => passwordHolder.value,
     });
 
-    return new EncryptedPrivateStateStore(provider, passwordHolder);
+    const store = new EncryptedPrivateStateStore(provider, passwordHolder);
+
+    try {
+      await store.#assertPasswordOpensStore();
+    } catch (error) {
+      await store.dispose();
+      throw error;
+    }
+
+    return store;
+  }
+
+  /**
+   * Refuses a password the existing store was not written with.
+   *
+   * The provider keeps no password verifier: a wrong password derives a
+   * different key from the stored salt and every write still succeeds, leaving
+   * entries that the real password cannot read and that break every later
+   * export, so every backup. Exporting the signing keys decrypts each one, and
+   * every round this store holds has one. A `SigningKeyExportError` is raised
+   * only after that, for an empty store or a key count limit, so it proves the
+   * password; anything else means it did not open the store.
+   */
+  async #assertPasswordOpensStore(): Promise<void> {
+    try {
+      await this.provider.exportSigningKeys();
+    } catch (error) {
+      if (error instanceof SigningKeyExportError) {
+        return;
+      }
+
+      throw new Error(
+        'The private-state storage password does not open the existing store; nothing was written',
+      );
+    }
   }
 
   async dispose(): Promise<void> {

@@ -604,6 +604,36 @@ describe('AEQUIRA CLI secret storage', () => {
     }
   });
 
+  test('refuses a mistyped storage password before it can write unreadable entries', async () => {
+    // A wrong password used to open the store anyway, and everything written
+    // under it was unreadable with the real one and broke every later backup.
+    const directory = await mkdtemp(path.join(tmpdir(), 'aequira-private-state-'));
+    const config = loadCliConfig({
+      environment: { AEQUIRA_PRIVATE_STATE_DIR: directory },
+    });
+    const password = 'R7!mQ2@vL9#zT4$p';
+    const contractAddress = sampleContractAddress();
+    let store;
+
+    try {
+      store = await EncryptedPrivateStateStore.create(config, 'account-one', password);
+      await store.provider.setSigningKey(contractAddress, 'ab'.repeat(32));
+      await store.dispose();
+      store = undefined;
+
+      await assert.rejects(
+        EncryptedPrivateStateStore.create(config, 'account-one', 'W8@kP3#nV6!cR2$x'),
+        /does not open the existing store/,
+      );
+
+      store = await EncryptedPrivateStateStore.create(config, 'account-one', password);
+      assert.equal(await store.provider.getSigningKey(contractAddress), 'ab'.repeat(32));
+    } finally {
+      await store?.dispose();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   test('writes encrypted runtime exports to a non-overwriting 0600 backup', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'aequira-backup-'));
     const config = loadCliConfig({
