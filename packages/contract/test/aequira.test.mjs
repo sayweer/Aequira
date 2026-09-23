@@ -735,6 +735,46 @@ describe('AEQUIRA L1 contract', () => {
     );
   });
 
+  test('refuses a forged enrollment path that does not reconstruct the tree root', () => {
+    // The honest witness stops an unenrolled applicant in JavaScript, so the
+    // circuit's own root check needs a tampered client to reach it. This path
+    // carries the caller's real leaf, which clears the binding assertion, with
+    // the siblings of another applicant's leaf: only `checkRoot` stops it.
+    const other = { ...APPLICANT, secret: bytes(55) };
+    const context = setupApply({
+      enrolled: false,
+      alsoEnroll: [other],
+      witnessOverrides: {
+        applicantMerklePath: ({ ledger, privateState }) => [
+          privateState,
+          {
+            leaf: pureCircuits.applicantLeaf(
+              APPLICANT.incomeBand,
+              APPLICANT.gpaScaled,
+              APPLICANT.regionCode,
+              APPLICANT.secret,
+              APPLICANT.salt,
+            ),
+            path: ledger.applicantTree.findPathForLeaf(
+              pureCircuits.enrollmentLeaf(
+                other.incomeBand,
+                other.gpaScaled,
+                other.regionCode,
+                pureCircuits.applicantId(other.secret),
+                other.salt,
+              ),
+            ).path,
+          },
+        ],
+      },
+    });
+
+    assert.throws(
+      () => context.simulator.call('apply', context.nonce),
+      /Applicant is not enrolled in the round/,
+    );
+  });
+
   test('publishes nothing that links an application to the enrolled commitment', () => {
     // The enrollment leaf is public: the institution put it there. So the
     // property under test is not that the leaf is hidden, but that neither
@@ -815,6 +855,85 @@ describe('AEQUIRA L1 contract', () => {
     assert.throws(
       () => simulator.call('registerApplicant', leaf),
       /Applicants can only be enrolled during setup/,
+    );
+  });
+
+  test('registers reviewers only during setup, only once, and only for the administrator', () => {
+    const adminSecret = bytes(1);
+    const reviewer = pureCircuits.reviewerId(bytes(3));
+    const simulator = new AequiraSimulator({
+      roundId: bytes(2),
+      adminSecret,
+      reviewerSecret: bytes(3),
+      score: 50n,
+      scoreSalt: bytes(4),
+    });
+
+    simulator.setPrivateState({ adminSecret: bytes(99) });
+    assert.throws(
+      () => simulator.call('registerReviewer', reviewer),
+      /Only the round administrator/,
+    );
+
+    simulator.setPrivateState({ adminSecret });
+    simulator.call('registerReviewer', reviewer);
+    assert.throws(
+      () => simulator.call('registerReviewer', reviewer),
+      /Reviewer is already registered/,
+    );
+
+    // The tree must be frozen once setup closes, so a single current root
+    // keeps proving membership for every reviewer.
+    simulator.call('openApplications');
+    assert.throws(
+      () => simulator.call('registerReviewer', pureCircuits.reviewerId(bytes(5))),
+      /Reviewers can only be registered during setup/,
+    );
+  });
+
+  test('opens review and reveal only in order and only for the administrator', () => {
+    const adminSecret = bytes(1);
+    const simulator = new AequiraSimulator({
+      roundId: bytes(2),
+      adminSecret,
+      reviewerSecret: bytes(3),
+      score: 50n,
+      scoreSalt: bytes(4),
+    });
+
+    assert.throws(() => simulator.call('openReview'), /Review can only open after applications/);
+    assert.throws(() => simulator.call('openReveal'), /Reveal can only open after review/);
+
+    simulator.call('openApplications');
+    simulator.setPrivateState({ adminSecret: bytes(99) });
+    assert.throws(() => simulator.call('openReview'), /Only the round administrator/);
+    simulator.setPrivateState({ adminSecret });
+    simulator.call('openReview');
+
+    simulator.setPrivateState({ adminSecret: bytes(99) });
+    assert.throws(() => simulator.call('openReveal'), /Only the round administrator/);
+    simulator.setPrivateState({ adminSecret });
+    simulator.call('openReveal');
+
+    assert.throws(() => simulator.call('openReview'), /Review can only open after applications/);
+    assert.equal(simulator.getLedger().phase, Phase.REVEAL);
+  });
+
+  test('keeps scores sealed during review and closed to new commits during reveal', () => {
+    // Opening early would leak the tally while others are still committing,
+    // and committing late would let a reviewer score after seeing the others.
+    const { simulator, applicationId } = setupReview({ score: 64n });
+
+    simulator.call('commitScore', applicationId);
+    assert.throws(
+      () => simulator.call('revealScore', applicationId),
+      /Scores can only be revealed during reveal/,
+    );
+
+    simulator.call('openReveal');
+    assert.throws(
+      () => simulator.call('commitScore', applicationId),
+      /Scores can only be committed during review/,
     );
   });
 });
