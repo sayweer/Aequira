@@ -6,6 +6,21 @@ export const LACE_INSTALL_URL =
 
 const PREPROD_UNSHIELDED_ADDRESS_PREFIX = 'mn_addr_preprod1';
 
+/**
+ * How long a connection may wait on Lace. Long enough to unlock it and approve,
+ * but finite: Lace settles nothing while its approval window is hidden or never
+ * opens, and without a limit the page waited on it for good with the button
+ * locked, so the only way out was a reload.
+ */
+export const WALLET_CONNECT_TIMEOUT_MS = 60_000;
+
+export class WalletTimeoutError extends Error {
+  constructor() {
+    super('Lace did not answer the connection request');
+    this.name = 'WalletTimeoutError';
+  }
+}
+
 export type InjectedWallet = {
   readonly api: InitialAPI;
   readonly id: string;
@@ -55,7 +70,28 @@ export const shortenAddress = (address: string): string =>
 export const isPreprodUnshieldedAddress = (address: string): boolean =>
   address.startsWith(PREPROD_UNSHIELDED_ADDRESS_PREFIX);
 
-export const connectInjectedWallet = async (wallet: InitialAPI): Promise<ConnectedWallet> => {
+const withTimeout = <Value>(promise: Promise<Value>, timeoutMs: number): Promise<Value> =>
+  new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new WalletTimeoutError()), timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+
+export const connectInjectedWallet = (
+  wallet: InitialAPI,
+  timeoutMs = WALLET_CONNECT_TIMEOUT_MS,
+): Promise<ConnectedWallet> => withTimeout(openConnection(wallet), timeoutMs);
+
+const openConnection = async (wallet: InitialAPI): Promise<ConnectedWallet> => {
   const connectedApi = await wallet.connect(AEQUIRA_NETWORK_ID);
   const [{ unshieldedAddress }, connectionStatus] = await Promise.all([
     connectedApi.getUnshieldedAddress(),
@@ -77,6 +113,10 @@ export const connectInjectedWallet = async (wallet: InitialAPI): Promise<Connect
 };
 
 export const toWalletErrorMessage = (error: unknown): string => {
+  if (error instanceof WalletTimeoutError) {
+    return 'Lace did not answer. Its approval window may be hidden behind this one, or Lace may be locked. Open Lace from the browser toolbar, unlock it, then connect again.';
+  }
+
   const message = error instanceof Error ? error.message.toLowerCase() : '';
 
   if (message.includes('reject') || message.includes('declin') || message.includes('cancel')) {

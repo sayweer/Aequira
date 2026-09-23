@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   connectInjectedWallet,
@@ -49,6 +49,9 @@ export const useWalletConnection = (): WalletConnection => {
   const [connectedWallet, setConnectedWallet] = useState<ConnectedWallet | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [detectionAttempt, setDetectionAttempt] = useState(0);
+  // Lace can still answer a request the page has given up on. Only the latest
+  // attempt may change the screen, so a late answer cannot undo a retry.
+  const connectAttemptRef = useRef(0);
 
   useEffect(() => {
     let elapsed = 0;
@@ -133,14 +136,22 @@ export const useWalletConnection = (): WalletConnection => {
       return;
     }
 
+    const attempt = ++connectAttemptRef.current;
     setErrorMessage(null);
     setViewState('connecting');
 
     try {
       const connection = await connectInjectedWallet(selectedWallet.api);
+
+      if (attempt !== connectAttemptRef.current) {
+        return;
+      }
       setConnectedWallet(connection);
       setViewState('connected');
     } catch (error) {
+      if (attempt !== connectAttemptRef.current) {
+        return;
+      }
       setConnectedWallet(null);
       setErrorMessage(toWalletErrorMessage(error));
       setViewState('error');

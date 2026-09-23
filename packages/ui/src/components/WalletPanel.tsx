@@ -106,6 +106,12 @@ export const WalletPanel = ({ busy, chromeless = false, wallet }: WalletPanelPro
             {viewState === 'connecting' && <span className="spinner" aria-hidden="true" />}
             <span>{viewState === 'connecting' ? 'Approve in Lace…' : 'Connect Lace'}</span>
           </button>
+          {viewState === 'connecting' && (
+            <p className="field-hint">
+              No Lace window? It may be behind this one, or Lace may be locked: open it from the
+              browser toolbar.
+            </p>
+          )}
         </>
       )}
 

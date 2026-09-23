@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  WalletTimeoutError,
+  connectInjectedWallet,
   isInitialApi,
   isPreprodUnshieldedAddress,
   listInjectedWallets,
@@ -55,4 +57,27 @@ test('shortens public addresses without changing short values', () => {
 test('maps rejected connections to a recoverable message', () => {
   assert.match(toWalletErrorMessage(new Error('User rejected request')), /cancelled in Lace/);
   assert.match(toWalletErrorMessage(new Error('unknown')), /could not connect/);
+});
+
+test('gives up on a connection Lace never answers, with a way forward', async () => {
+  // Lace settles nothing while its approval window is hidden or never opens.
+  // The page used to wait on it for good, with the connect button locked.
+  const silent = createWallet({ connect: () => new Promise(() => {}) });
+
+  await assert.rejects(connectInjectedWallet(silent, 20), WalletTimeoutError);
+  assert.match(toWalletErrorMessage(new WalletTimeoutError()), /did not answer/);
+  assert.match(toWalletErrorMessage(new WalletTimeoutError()), /connect again/);
+});
+
+test('connects within the limit when Lace answers', async () => {
+  const connectedApi = {
+    getConnectionStatus: async () => ({ networkId: 'preprod', status: 'connected' }),
+    getUnshieldedAddress: async () => ({ unshieldedAddress: 'mn_addr_preprod1abc' }),
+  };
+  const wallet = createWallet({ connect: async () => connectedApi });
+
+  const connection = await connectInjectedWallet(wallet, 1_000);
+
+  assert.equal(connection.address, 'mn_addr_preprod1abc');
+  assert.equal(connection.api, connectedApi);
 });
